@@ -6,6 +6,7 @@ export type Verdict =
   | "ACCEPTED"
   | "WRONG_ANSWER"
   | "TIME_LIMIT_EXCEEDED"
+  | "MEMORY_LIMIT_EXCEEDED"
   | "RUNTIME_ERROR"
   | "COMPILATION_ERROR";
 
@@ -127,4 +128,72 @@ export interface SubmitPayload {
   };
   arena: Arena;
   leaderboard: LeaderboardEntry[];
+}
+
+export interface SubmissionQueuedPayload {
+  roomCode: string;
+  jobId: string;
+  status: "QUEUED";
+  queuedAt: string;
+}
+
+export interface SubmissionProcessedResult {
+  type: "PROCESSED";
+  roomCode: string;
+  userId: string;
+  jobId: string;
+  arenaState: RoomState;
+  finishReason: "TIME_UP" | "ADMIN_FINISHED" | "SYSTEM_FINISHED" | null;
+  finished: boolean;
+  finishedAt: string | null;
+  endTime: string | null;
+  participant: {
+    userId: string;
+    name: string;
+    role: Role;
+    score: number;
+    solvedCount: number;
+    attempts: number;
+    penaltySeconds: number;
+    acceptedAt: string | null;
+  };
+  leaderboardEntry: LeaderboardEntry | null;
+  submission: {
+    id: string;
+    verdict: Verdict;
+    passedCount: number;
+    totalCount: number;
+    executionMs: number;
+    scoreAwarded: number;
+    penaltySecondsAdded: number;
+    judgeMode: string;
+    createdAt: string;
+    stderr: string;
+  };
+}
+
+export interface SubmissionSkippedResult {
+  type: "SKIPPED";
+  roomCode: string;
+  userId: string;
+  jobId: string;
+  reason: string;
+  message: string;
+  arenaState?: RoomState;
+  finishReason?: "TIME_UP" | "ADMIN_FINISHED" | "SYSTEM_FINISHED" | null;
+}
+
+export interface SubmissionJobStatusPayload {
+  roomCode: string;
+  jobId: string;
+  state:
+    | "waiting"
+    | "active"
+    | "delayed"
+    | "paused"
+    | "completed"
+    | "failed"
+    | "unknown";
+  result: SubmissionProcessedResult | SubmissionSkippedResult | null;
+  failedReason: string | null;
 }

@@ -4,6 +4,7 @@ export const SUBMISSION_VERDICTS = Object.freeze({
   ACCEPTED: "ACCEPTED",
   WRONG_ANSWER: "WRONG_ANSWER",
   TIME_LIMIT_EXCEEDED: "TIME_LIMIT_EXCEEDED",
+  MEMORY_LIMIT_EXCEEDED: "MEMORY_LIMIT_EXCEEDED",
   RUNTIME_ERROR: "RUNTIME_ERROR",
   COMPILATION_ERROR: "COMPILATION_ERROR",
 });
@@ -12,6 +13,7 @@ const submissionSchema = new mongoose.Schema(
   {
     arenaId: { type: mongoose.Schema.Types.ObjectId, ref: "Arena", required: true, index: true },
     roomCode: { type: String, required: true, index: true },
+    jobId: { type: String, required: true, index: true, unique: true },
     userId: { type: String, required: true, index: true },
     participantName: { type: String, required: true },
     language: { type: String, required: true, trim: true },

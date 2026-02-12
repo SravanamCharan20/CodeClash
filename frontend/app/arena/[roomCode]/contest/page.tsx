@@ -7,6 +7,7 @@ import {
   finishArena,
   getArena,
   getArenaLeaderboard,
+  getSubmissionJobStatus,
   getArenaTimer,
   getErrorMessage,
   submitSolution,
@@ -15,6 +16,25 @@ import { SOCKET_URL } from "@/lib/config";
 import { formatDateTime, formatDuration } from "@/lib/format";
 import { getRoomSession, normalizeRoomCode } from "@/lib/session";
 import { Arena, LeaderboardEntry } from "@/lib/types";
+
+function leaderboardSort(a: LeaderboardEntry, b: LeaderboardEntry): number {
+  if (b.score !== a.score) return b.score - a.score;
+  if (a.penaltySeconds !== b.penaltySeconds) return a.penaltySeconds - b.penaltySeconds;
+
+  const aAccepted = a.acceptedAt ? new Date(a.acceptedAt).getTime() : Number.MAX_SAFE_INTEGER;
+  const bAccepted = b.acceptedAt ? new Date(b.acceptedAt).getTime() : Number.MAX_SAFE_INTEGER;
+  if (aAccepted !== bAccepted) return aAccepted - bAccepted;
+
+  return a.name.localeCompare(b.name);
+}
+
+function upsertLeaderboardEntry(
+  current: LeaderboardEntry[],
+  entry: LeaderboardEntry
+): LeaderboardEntry[] {
+  const merged = [...current.filter((row) => row.userId !== entry.userId), entry].sort(leaderboardSort);
+  return merged.map((row, index) => ({ ...row, rank: index + 1 }));
+}
 
 export default function ContestPage() {
   const params = useParams<{ roomCode: string }>();
@@ -36,6 +56,7 @@ export default function ContestPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
+  const [pendingJobId, setPendingJobId] = useState<string | null>(null);
 
   const me = useMemo(() => {
     if (!arena || !session) return null;
@@ -115,9 +136,22 @@ export default function ContestPage() {
       }
     });
 
+    socket.on("arena:leaderboard-delta", (payload: { entry: LeaderboardEntry }) => {
+      if (payload?.entry) {
+        setLeaderboard((previous) => upsertLeaderboardEntry(previous, payload.entry));
+      }
+    });
+
+    socket.on("arena:leaderboard-top", (payload: { leaderboard: LeaderboardEntry[] }) => {
+      if (Array.isArray(payload?.leaderboard) && payload.leaderboard.length > 0) {
+        setLeaderboard(payload.leaderboard);
+      }
+    });
+
     socket.on(
       "arena:submission-result",
       (payload: {
+        jobId?: string;
         userId: string;
         verdict: string;
         passedCount: number;
@@ -128,9 +162,33 @@ export default function ContestPage() {
           setFeedback(
             `${payload.verdict} (${payload.passedCount}/${payload.totalCount}) in ${payload.executionMs}ms`
           );
+          if (!payload.jobId || payload.jobId === pendingJobId) {
+            setPendingJobId(null);
+            void loadContestState(true);
+          }
         }
       }
     );
+
+    socket.on(
+      "arena:submission-skipped",
+      (payload: { userId: string; jobId?: string; message?: string }) => {
+        if (payload.userId === session?.userId) {
+          if (!payload.jobId || payload.jobId === pendingJobId) {
+            setPendingJobId(null);
+            setError(payload.message || "Submission was skipped.");
+            void loadContestState(true);
+          }
+        }
+      }
+    );
+
+    socket.on("arena:submission-failed", (payload: { jobId?: string; failedReason?: string }) => {
+      if (pendingJobId && payload?.jobId === pendingJobId) {
+        setPendingJobId(null);
+        setError(payload.failedReason || "Submission job failed.");
+      }
+    });
 
     socket.on(
       "arena:contest-started",
@@ -156,7 +214,68 @@ export default function ContestPage() {
     return () => {
       socket.disconnect();
     };
-  }, [roomCode, router, session?.userId]);
+  }, [roomCode, router, session?.userId, pendingJobId, loadContestState]);
+
+  useEffect(() => {
+    if (!pendingJobId) return;
+
+    let cancelled = false;
+
+    const poll = async () => {
+      try {
+        const status = await getSubmissionJobStatus(roomCode, pendingJobId);
+        if (cancelled) return;
+
+        if (status.state === "completed") {
+          setPendingJobId(null);
+
+          const result = status.result;
+
+          if (result && result.type === "PROCESSED") {
+            const submission = result.submission;
+            setFeedback(
+              `${submission.verdict} (${submission.passedCount}/${submission.totalCount}) in ${submission.executionMs}ms`
+            );
+
+            if (result.leaderboardEntry) {
+              setLeaderboard((previous) =>
+                upsertLeaderboardEntry(previous, result.leaderboardEntry as LeaderboardEntry)
+              );
+            }
+
+            if (result.finished || result.arenaState === "FINISHED") {
+              router.replace(`/arena/${roomCode}/results`);
+              return;
+            }
+          } else if (result && result.type === "SKIPPED") {
+            setError(result.message || "Submission skipped.");
+          }
+
+          await loadContestState(true);
+          return;
+        }
+
+        if (status.state === "failed") {
+          setPendingJobId(null);
+          setError(status.failedReason || "Submission failed.");
+        }
+      } catch (err) {
+        if (cancelled) return;
+        setPendingJobId(null);
+        setError(getErrorMessage(err));
+      }
+    };
+
+    void poll();
+    const intervalId = window.setInterval(() => {
+      void poll();
+    }, 1500);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [pendingJobId, roomCode, router, loadContestState]);
 
   async function handleSubmitSolution() {
     if (!session) {
@@ -179,15 +298,8 @@ export default function ContestPage() {
         sourceCode,
       });
 
-      setArena(response.arena);
-      setLeaderboard(response.leaderboard);
-      setFeedback(
-        `${response.submission.verdict} (${response.submission.passedCount}/${response.submission.totalCount}) in ${response.submission.executionMs}ms`
-      );
-
-      if (response.arena.state === "FINISHED") {
-        router.replace(`/arena/${roomCode}/results`);
-      }
+      setPendingJobId(response.jobId);
+      setFeedback(`Submission queued (job: ${response.jobId.slice(0, 8)})`);
     } catch (err) {
       setError(getErrorMessage(err));
     } finally {
@@ -285,10 +397,10 @@ export default function ContestPage() {
           <div className="mt-3 flex flex-wrap gap-2">
             <button
               className="rounded bg-black px-4 py-2 text-sm text-white disabled:opacity-60"
-              disabled={submitting || loading}
+              disabled={submitting || loading || Boolean(pendingJobId)}
               onClick={handleSubmitSolution}
             >
-              {submitting ? "Submitting..." : "Submit"}
+              {submitting ? "Queueing..." : pendingJobId ? "Submission In Queue..." : "Submit"}
             </button>
 
             {isAdmin ? (
@@ -312,6 +424,12 @@ export default function ContestPage() {
           {feedback ? (
             <p className="mt-3 rounded border border-green-200 bg-green-50 p-2 text-sm text-green-700">
               {feedback}
+            </p>
+          ) : null}
+
+          {pendingJobId ? (
+            <p className="mt-2 rounded border border-blue-200 bg-blue-50 p-2 text-xs text-blue-700">
+              Waiting for judge result... jobId={pendingJobId}
             </p>
           ) : null}
 

@@ -3,8 +3,9 @@ import {
   ArenaPayload,
   Difficulty,
   LeaderboardEntry,
+  SubmissionJobStatusPayload,
+  SubmissionQueuedPayload,
   SubmissionListPayload,
-  SubmitPayload,
   TimerPayload,
   Verdict,
 } from "./types";
@@ -136,11 +137,20 @@ export async function submitSolution(
     language: string;
     sourceCode: string;
   }
-): Promise<SubmitPayload> {
-  return request<SubmitPayload>(`/api/arenas/${normalizeRoomCode(roomCode)}/submissions`, {
+): Promise<SubmissionQueuedPayload> {
+  return request<SubmissionQueuedPayload>(`/api/arenas/${normalizeRoomCode(roomCode)}/submissions`, {
     method: "POST",
     body: JSON.stringify(payload),
   });
+}
+
+export async function getSubmissionJobStatus(
+  roomCode: string,
+  jobId: string
+): Promise<SubmissionJobStatusPayload> {
+  return request<SubmissionJobStatusPayload>(
+    `/api/arenas/${normalizeRoomCode(roomCode)}/submissions/jobs/${jobId}`
+  );
 }
 
 export async function finishArena(

@@ -5,6 +5,7 @@ import {
   getArenaByRoomCode,
   getArenaLeaderboard,
   getArenaSubmissions,
+  getSubmissionJobStatus,
   getArenaTimer,
   joinArena,
   setReadyStatus,
@@ -21,6 +22,7 @@ router.patch("/:roomCode/ready", setReadyStatus);
 router.patch("/:roomCode/start", startArena);
 router.get("/:roomCode/timer", getArenaTimer);
 router.get("/:roomCode/leaderboard", getArenaLeaderboard);
+router.get("/:roomCode/submissions/jobs/:jobId", getSubmissionJobStatus);
 router.get("/:roomCode/submissions", getArenaSubmissions);
 router.post("/:roomCode/submissions", submitSolution);
 router.patch("/:roomCode/finish", finishArena);

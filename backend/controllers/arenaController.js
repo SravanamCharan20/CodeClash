@@ -1,5 +1,9 @@
+import { randomUUID } from "node:crypto";
 import { Arena, ROOM_STATES } from "../models/Arena.js";
 import { Submission, SUBMISSION_VERDICTS } from "../models/Submission.js";
+import { createRedisClient } from "../config/redis.js";
+import { runtimeConfig } from "../config/runtime.js";
+import { enqueueSubmissionJob, getSubmissionJob } from "../queues/submissionQueue.js";
 import { generateRoomCode } from "../utils/generateRoomCode.js";
 import {
   buildLeaderboard,
@@ -7,10 +11,18 @@ import {
   finalizeIfExpired,
   getRemainingSeconds,
 } from "../services/arenaService.js";
+import {
+  getLeaderboardFromRedis,
+  seedLeaderboard,
+} from "../services/leaderboardService.js";
+import { checkSubmissionCooldown } from "../services/submissionRateLimitService.js";
+import { validateSubmissionSource } from "../services/submissionSecurityService.js";
+
+const redisClient = createRedisClient();
 
 const DIFFICULTIES = new Set(["EASY", "MEDIUM", "HARD"]);
-const ACCEPTED_SCORE = 100;
 const SUBMISSION_FILTER_VERDICTS = new Set(Object.values(SUBMISSION_VERDICTS));
+const SUPPORTED_LANGUAGES = new Set(["javascript", "python", "cpp", "java"]);
 
 function cleanText(value) {
   return typeof value === "string" ? value.trim() : "";
@@ -35,6 +47,7 @@ function formatSubmission(submission, includeSourceCode) {
   return {
     id: submission.id,
     roomCode: submission.roomCode,
+    jobId: submission.jobId,
     userId: submission.userId,
     participantName: submission.participantName,
     language: submission.language,
@@ -121,82 +134,23 @@ function validateProblem(problem) {
   return null;
 }
 
-function getMockJudgeResult(sourceCode, totalCount) {
-  const trimmed = sourceCode.trim();
-  const lower = trimmed.toLowerCase();
-  const executionMs = 20 + (trimmed.length % 120);
+async function resolveLeaderboard(arena) {
+  try {
+    let redisBoard = await getLeaderboardFromRedis(redisClient, arena.roomCode);
 
-  if (lower.includes("syntaxerror")) {
-    return {
-      verdict: SUBMISSION_VERDICTS.COMPILATION_ERROR,
-      passedCount: 0,
-      totalCount,
-      executionMs,
-    };
+    if (redisBoard.length === 0 && arena.state !== ROOM_STATES.LOBBY) {
+      await seedLeaderboard(redisClient, arena.roomCode, arena.participants);
+      redisBoard = await getLeaderboardFromRedis(redisClient, arena.roomCode);
+    }
+
+    if (redisBoard.length > 0) {
+      return redisBoard;
+    }
+  } catch {
+    // fall back to DB-derived leaderboard if Redis is unavailable
   }
 
-  if (lower.includes("while(true)") || lower.includes("for(;;)")) {
-    return {
-      verdict: SUBMISSION_VERDICTS.TIME_LIMIT_EXCEEDED,
-      passedCount: 0,
-      totalCount,
-      executionMs: executionMs + 1000,
-    };
-  }
-
-  if (lower.includes("throw new error")) {
-    return {
-      verdict: SUBMISSION_VERDICTS.RUNTIME_ERROR,
-      passedCount: 0,
-      totalCount,
-      executionMs,
-    };
-  }
-
-  if (trimmed.length < 30 || (!lower.includes("return") && !lower.includes("print("))) {
-    return {
-      verdict: SUBMISSION_VERDICTS.WRONG_ANSWER,
-      passedCount: totalCount > 1 ? 1 : 0,
-      totalCount,
-      executionMs,
-    };
-  }
-
-  return {
-    verdict: SUBMISSION_VERDICTS.ACCEPTED,
-    passedCount: totalCount,
-    totalCount,
-    executionMs,
-  };
-}
-
-function applyAcceptedScoring(arena, participant, now) {
-  participant.attempts += 1;
-  let scoreAwarded = 0;
-  let penaltySecondsAdded = 0;
-
-  if (participant.solvedCount === 0) {
-    const elapsedSeconds = arena.startTime
-      ? Math.max(0, Math.floor((now.getTime() - new Date(arena.startTime).getTime()) / 1000))
-      : 0;
-    const wrongAttemptPenalty = Math.max(0, participant.attempts - 1) * 20;
-
-    scoreAwarded = ACCEPTED_SCORE;
-    penaltySecondsAdded = elapsedSeconds + wrongAttemptPenalty;
-
-    participant.score += scoreAwarded;
-    participant.solvedCount = 1;
-    participant.penaltySeconds += penaltySecondsAdded;
-    participant.acceptedAt = now;
-  }
-
-  return { scoreAwarded, penaltySecondsAdded };
-}
-
-function allParticipantsSolved(arena) {
-  const nonAdminParticipants = arena.participants.filter((participant) => participant.role !== "ADMIN");
-  const evaluationPool = nonAdminParticipants.length > 0 ? nonAdminParticipants : arena.participants;
-  return evaluationPool.every((participant) => participant.solvedCount > 0);
+  return buildLeaderboard(arena);
 }
 
 export async function createArena(req, res) {
@@ -272,8 +226,9 @@ export async function getArenaByRoomCode(req, res) {
     if (!arena) return res.status(404).json({ message: "Arena not found" });
 
     arena = await finalizeIfExpired(arena, io);
+    const leaderboard = await resolveLeaderboard(arena);
 
-    return res.status(200).json({ arena: publicArena(arena), leaderboard: buildLeaderboard(arena) });
+    return res.status(200).json({ arena: publicArena(arena), leaderboard });
   } catch (error) {
     return res.status(500).json({ message: error.message || "Internal server error" });
   }
@@ -395,6 +350,12 @@ export async function startArena(req, res) {
 
     await arena.save();
 
+    try {
+      await seedLeaderboard(redisClient, arena.roomCode, arena.participants);
+    } catch {
+      // non-fatal; leaderboard can still be served from DB fallback
+    }
+
     const io = req.app.get("io");
     if (io) {
       io.to(arena.roomCode).emit("arena:contest-started", {
@@ -449,6 +410,7 @@ export async function getArenaLeaderboard(req, res) {
 
     arena = await finalizeIfExpired(arena, io);
     const now = new Date();
+    const leaderboard = await resolveLeaderboard(arena);
 
     return res.status(200).json({
       roomCode: arena.roomCode,
@@ -458,7 +420,7 @@ export async function getArenaLeaderboard(req, res) {
       finishedAt: arena.finishedAt,
       finishReason: arena.finishReason,
       remainingSeconds: getRemainingSeconds(arena, now),
-      leaderboard: buildLeaderboard(arena),
+      leaderboard,
       serverTime: now,
     });
   } catch (error) {
@@ -528,13 +490,22 @@ export async function submitSolution(req, res) {
   try {
     const roomCode = normalizeRoomCode(req.params.roomCode);
     const userId = cleanText(req.body.userId);
-    const language = cleanText(req.body.language);
+    const language = cleanText(req.body.language).toLowerCase();
     const sourceCode = typeof req.body.sourceCode === "string" ? req.body.sourceCode : "";
 
     if (!userId || !language || !sourceCode.trim()) {
-      return res
-        .status(400)
-        .json({ message: "userId, language and sourceCode are required" });
+      return res.status(400).json({ message: "userId, language and sourceCode are required" });
+    }
+
+    if (!SUPPORTED_LANGUAGES.has(language)) {
+      return res.status(400).json({
+        message: `language must be one of: ${[...SUPPORTED_LANGUAGES].join(", ")}`,
+      });
+    }
+
+    const validationError = validateSubmissionSource(sourceCode);
+    if (validationError) {
+      return res.status(400).json({ message: validationError });
     }
 
     const io = req.app.get("io");
@@ -549,81 +520,92 @@ export async function submitSolution(req, res) {
     const participant = arena.participants.find((p) => p.userId === userId);
     if (!participant) return res.status(404).json({ message: "Participant not found" });
 
-    const now = new Date();
-    if (arena.endTime && now.getTime() >= new Date(arena.endTime).getTime()) {
-      arena = await finalizeArena(arena, io, "TIME_UP");
-      return res.status(409).json({ message: "Contest ended", arena: publicArena(arena) });
-    }
-
-    const totalCount = arena.problem.testCases.length;
-    const judge = getMockJudgeResult(sourceCode, totalCount);
-
-    let scoreAwarded = 0;
-    let penaltySecondsAdded = 0;
-    if (judge.verdict === SUBMISSION_VERDICTS.ACCEPTED) {
-      const scoring = applyAcceptedScoring(arena, participant, now);
-      scoreAwarded = scoring.scoreAwarded;
-      penaltySecondsAdded = scoring.penaltySecondsAdded;
-    } else {
-      participant.attempts += 1;
-    }
-
-    const submission = await Submission.create({
-      arenaId: arena.id,
-      roomCode: arena.roomCode,
+    const cooldown = await checkSubmissionCooldown({
+      redis: redisClient,
+      roomCode,
       userId,
-      participantName: participant.name,
+      cooldownSeconds: runtimeConfig.SUBMISSION_COOLDOWN_SECONDS,
+    });
+
+    if (!cooldown.allowed) {
+      return res.status(429).json({
+        message: "Submission rate limit exceeded",
+        retryAfterSeconds: cooldown.retryAfterSeconds,
+      });
+    }
+
+    const jobId = randomUUID();
+    await enqueueSubmissionJob({
+      jobId,
+      roomCode,
+      userId,
       language,
       sourceCode,
-      verdict: judge.verdict,
-      passedCount: judge.passedCount,
-      totalCount: judge.totalCount,
-      executionMs: judge.executionMs,
-      scoreAwarded,
-      penaltySecondsAdded,
+      submittedAt: new Date().toISOString(),
     });
 
-    await arena.save();
-    const leaderboard = buildLeaderboard(arena);
+    return res.status(202).json({
+      roomCode,
+      jobId,
+      status: "QUEUED",
+      queuedAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    return res.status(503).json({ message: error.message || "Submission queue unavailable" });
+  }
+}
 
-    if (io) {
-      io.to(arena.roomCode).emit("arena:submission-result", {
-        roomCode: arena.roomCode,
-        userId,
-        verdict: judge.verdict,
-        passedCount: judge.passedCount,
-        totalCount: judge.totalCount,
-        executionMs: judge.executionMs,
-        scoreAwarded,
-        penaltySecondsAdded,
-        serverTime: now,
-      });
+export async function getSubmissionJobStatus(req, res) {
+  try {
+    const roomCode = normalizeRoomCode(req.params.roomCode);
+    const jobId = cleanText(req.params.jobId);
 
-      io.to(arena.roomCode).emit("arena:leaderboard-updated", {
-        roomCode: arena.roomCode,
-        leaderboard,
+    if (!jobId) return res.status(400).json({ message: "jobId is required" });
+
+    const job = await getSubmissionJob(jobId);
+    if (job) {
+      const jobRoomCode = normalizeRoomCode(job.data?.roomCode);
+      if (jobRoomCode && jobRoomCode !== roomCode) {
+        return res.status(403).json({ message: "Job does not belong to this room" });
+      }
+
+      const state = await job.getState();
+      return res.status(200).json({
+        roomCode,
+        jobId,
+        state,
+        result: state === "completed" ? job.returnvalue : null,
+        failedReason: state === "failed" ? job.failedReason : null,
       });
     }
 
-    let finalArena = arena;
-    if (allParticipantsSolved(arena)) {
-      finalArena = await finalizeArena(arena, io, "SYSTEM_FINISHED");
+    const persistedSubmission = await Submission.findOne({ roomCode, jobId }).sort({ createdAt: -1 });
+
+    if (persistedSubmission) {
+      return res.status(200).json({
+        roomCode,
+        jobId,
+        state: "completed",
+        result: {
+          type: "PROCESSED",
+          roomCode,
+          userId: persistedSubmission.userId,
+          submission: {
+            id: persistedSubmission.id,
+            verdict: persistedSubmission.verdict,
+            passedCount: persistedSubmission.passedCount,
+            totalCount: persistedSubmission.totalCount,
+            executionMs: persistedSubmission.executionMs,
+            scoreAwarded: persistedSubmission.scoreAwarded,
+            penaltySecondsAdded: persistedSubmission.penaltySecondsAdded,
+            judgeMode: persistedSubmission.judgeMode,
+            createdAt: persistedSubmission.createdAt,
+          },
+        },
+      });
     }
 
-    return res.status(201).json({
-      submission: {
-        id: submission.id,
-        verdict: submission.verdict,
-        passedCount: submission.passedCount,
-        totalCount: submission.totalCount,
-        executionMs: submission.executionMs,
-        scoreAwarded: submission.scoreAwarded,
-        penaltySecondsAdded: submission.penaltySecondsAdded,
-        createdAt: submission.createdAt,
-      },
-      arena: publicArena(finalArena),
-      leaderboard: buildLeaderboard(finalArena),
-    });
+    return res.status(404).json({ message: "Job not found" });
   } catch (error) {
     return res.status(500).json({ message: error.message || "Internal server error" });
   }
@@ -640,10 +622,11 @@ export async function finishArena(req, res) {
     if (!arena) return res.status(404).json({ message: "Arena not found" });
 
     if (arena.state === ROOM_STATES.FINISHED) {
+      const leaderboard = await resolveLeaderboard(arena);
       return res.status(200).json({
         message: "Arena already finished",
         arena: publicArena(arena),
-        leaderboard: buildLeaderboard(arena),
+        leaderboard,
       });
     }
 
@@ -653,10 +636,11 @@ export async function finishArena(req, res) {
     if (!admin) return res.status(403).json({ message: "Only admin can finish the contest" });
 
     const finishedArena = await finalizeArena(arena, io, "ADMIN_FINISHED");
+    const leaderboard = await resolveLeaderboard(finishedArena);
 
     return res.status(200).json({
       arena: publicArena(finishedArena),
-      leaderboard: buildLeaderboard(finishedArena),
+      leaderboard,
     });
   } catch (error) {
     return res.status(500).json({ message: error.message || "Internal server error" });
