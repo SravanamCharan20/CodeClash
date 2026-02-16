@@ -3,6 +3,7 @@ import { connectDB } from "./config/db.js";
 import dotenv from "dotenv";
 import cookieParser from "cookie-parser";
 import User from "./models/User.js";
+import { authorizeRoles, requireAuth } from "./middlewares/auth.js";
 
 dotenv.config();
 const PORT = process.env.PORT || 8888;
@@ -111,6 +112,24 @@ app.post("/auth/logout", (req, res) => {
 
   res.json({ message: "Logged out successfully" });
 });
+
+app.get("/profile", requireAuth, (req, res) => {
+  res.json({
+    message: "Profile fetched successfully",
+    user: req.user,
+  });
+});
+
+app.get(
+  "/admin/dashboard",
+  requireAuth,
+  authorizeRoles("admin"),
+  (req, res) => {
+    res.json({
+      message: "Welcome Admin 👑",
+    });
+  }
+);
 
 connectDB().then(() => {
   console.log("Connected to DB...");
