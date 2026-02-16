@@ -51,7 +51,7 @@ app.post("/auth/signup", async (req, res) => {
       user: userResponse,
     });
   } catch (error) {
-    console.error("Error : ",error.message);
+    console.error("Error : ", error.message);
     return res.status(500).json({
       message: "Internal server error",
     });
@@ -85,22 +85,32 @@ app.post("/auth/signin", async (req, res) => {
       });
     }
 
+    const token = existingUser.getJWT();
     const userInfo = existingUser.toJSON();
+
+    const expirationDate = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    res.cookie("token", token, { expires: expirationDate });
     return res.status(200).json({
       message: "Login successful",
       user: userInfo,
     });
 
+
   } catch (error) {
-    console.error("Error : ",error.message);
+    console.error("Error : ", error.message);
     return res.status(500).json({
       message: "Internal server error",
     });
   }
 });
 
+app.post("/auth/logout", (req, res) => {
+  res.cookie("token", "", {
+    expires: new Date(0),
+  });
 
-
+  res.json({ message: "Logged out successfully" });
+});
 
 connectDB().then(() => {
   console.log("Connected to DB...");

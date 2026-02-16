@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import validator from "validator";
 import bcrypt from "bcryptjs";
+import jwt from "jsonwebtoken";
 
 const userSchema = new mongoose.Schema(
   {
@@ -35,6 +36,11 @@ const userSchema = new mongoose.Schema(
           "Password must be strong (min 8 chars, uppercase, lowercase, number, symbol)",
       },
     },
+    role: {
+      type: String,
+      enum: ["user", "admin"],
+      default: "user",
+    },
   },
   { timestamps: true }
 );
@@ -62,6 +68,17 @@ userSchema.methods.toJSON = function () {
   delete userObject.updatedAt;
   delete userObject.__v;
   return userObject;
+};
+
+userSchema.methods.getJWT = function () {
+    const token = jwt.sign(
+      { _id: this._id, role: this.role },
+      process.env.JWT_SECRET,
+      {
+        expiresIn: "1d",
+      }
+    );
+    return token;
 };
 
 export default mongoose.model("User", userSchema);
