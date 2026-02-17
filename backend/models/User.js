@@ -33,7 +33,7 @@ const userSchema = new mongoose.Schema(
           });
         },
         message:
-          "Password must be strong (min 8 chars, uppercase, lowercase, number, symbol)",
+          "needs a bit more power — use 8+ characters with caps, small letters, a number, and a symbol 😅"
       },
     },
     role: {

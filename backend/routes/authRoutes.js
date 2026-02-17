@@ -10,7 +10,7 @@ authRouter.post("/signup", async (req, res) => {
 
     if (!username || !email || !password) {
       return res.status(400).json({
-        message: "All fields are required",
+        message: "Hey, you missed a few fields 😅",
       });
     }
 
@@ -19,7 +19,7 @@ authRouter.post("/signup", async (req, res) => {
 
     if (existingUser) {
       return res.status(409).json({
-        message: "Email already registered",
+        message: "This email is already in use.",
       });
     }
 
@@ -36,13 +36,13 @@ authRouter.post("/signup", async (req, res) => {
     };
 
     return res.status(201).json({
-      message: "User created successfully",
+      message: "Account created! You’re good to go 🚀",
       user: userResponse,
     });
   } catch (error) {
     console.error("Error : ", error.message);
     return res.status(500).json({
-      message: "Internal server error",
+      message: error.message,
     });
   }
 });
@@ -53,7 +53,7 @@ authRouter.post("/signin", async (req, res) => {
 
     if (!email || !password) {
       return res.status(400).json({
-        message: "Email and password are required",
+        message: "Please enter both email and password.",
       });
     }
 
@@ -62,7 +62,7 @@ authRouter.post("/signin", async (req, res) => {
     const existingUser = await User.findOne({ email });
     if (!existingUser) {
       return res.status(401).json({
-        message: "Invalid credentials",
+        message: "That email or password doesn’t look right.",
       });
     }
 
@@ -70,7 +70,7 @@ authRouter.post("/signin", async (req, res) => {
 
     if (!validPassword) {
       return res.status(401).json({
-        message: "Invalid credentials",
+        message: "That email or password doesn’t look right.",
       });
     }
 
@@ -80,18 +80,19 @@ authRouter.post("/signin", async (req, res) => {
     const expirationDate = new Date(Date.now() + 24 * 60 * 60 * 1000);
     res.cookie("token", token, {
       httpOnly: true,
-      secure: false,       // true ONLY in HTTPS (prod)
-      sameSite: "lax",     // IMPORTANT
+      secure: false,
+      sameSite: "lax",
       expires: expirationDate,
     });
+
     return res.status(200).json({
-      message: "Login successful",
+      message: "Welcome back! Logged in successfully 👋",
       user: userInfo,
     });
   } catch (error) {
     console.error("Error : ", error.message);
     return res.status(500).json({
-      message: "Internal server error",
+      message: "We hit a snag. Please try again in a bit.",
     });
   }
 });
@@ -101,12 +102,14 @@ authRouter.post("/logout", (req, res) => {
     expires: new Date(0),
   });
 
-  res.json({ message: "Logged out successfully" });
+  res.json({
+    message: "You’ve been logged out. See you soon!",
+  });
 });
 
 authRouter.get("/profile", requireAuth, (req, res) => {
   res.json({
-    message: "Profile fetched successfully",
+    message: "Here’s your profile.",
     user: req.user,
   });
 });
@@ -117,7 +120,7 @@ authRouter.get(
   authorizeRoles("admin"),
   (req, res) => {
     res.json({
-      message: "Welcome Admin 👑",
+      message: "Welcome back, boss 👑",
     });
   }
 );

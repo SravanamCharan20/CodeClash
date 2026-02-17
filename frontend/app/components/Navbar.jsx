@@ -1,4 +1,4 @@
-'use client';
+"use client";
 import React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -22,7 +22,14 @@ const Navbar = () => {
     }
   };
 
-  if (loading) return null;
+  // 🟡 Smooth skeleton while auth loads
+  if (loading) {
+    return (
+      <nav className="fixed top-6 left-1/2 -translate-x-1/2 z-50 w-[90%] max-w-3xl">
+        <div className="h-12 rounded-full bg-black/40 backdrop-blur-md border border-white/10 animate-pulse" />
+      </nav>
+    );
+  }
 
   return (
     <nav
@@ -37,12 +44,12 @@ const Navbar = () => {
       "
     >
       <div className="px-6 py-3 flex items-center justify-between text-white">
-        
+
         {/* Logo */}
-        <Link href="/" className="flex items-center gap-3">
-          <span className="text-xl">⚔️</span>
+        <Link href="/" className="flex items-center gap-3 group">
+          <span className="text-xl transition group-hover:scale-110">⚔️</span>
           <span className="text-lg font-semibold tracking-wide">
-            Code<span className="text-indigo-400">Clash</span>
+            Code<span className="text-green-400">Clash</span>
           </span>
         </Link>
 
@@ -58,7 +65,9 @@ const Navbar = () => {
 
             <Link
               href="/auth/signup"
-              className="text-sm px-4 py-1.5 rounded-full bg-indigo-500 hover:bg-indigo-600 transition"
+              className="text-sm px-4 py-1.5 rounded-full
+                         bg-green-500 hover:bg-green-600
+                         transition shadow-md"
             >
               Sign Up
             </Link>
@@ -66,12 +75,17 @@ const Navbar = () => {
         ) : (
           <div className="flex items-center gap-4">
             <span className="text-sm text-gray-300">
-              Hi, <span className="text-white">{user.username}</span>
+              Hi,{" "}
+              <span className="text-white font-medium">
+                {user.username}
+              </span>
             </span>
 
             <button
               onClick={handleLogout}
-              className="text-sm cursor-pointer px-4 py-1.5 rounded-full bg-red-500/80 hover:bg-red-600 transition"
+              className="text-sm px-4 py-1.5 rounded-full
+                         bg-red-500 hover:bg-red-600
+                         transition cursor-pointer"
             >
               Logout
             </button>
