@@ -1,9 +1,29 @@
-"use client"
-
-import Link from "next/link";
+'use client';
 import React from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useUser } from "../utils/UserContext";
 
 const Navbar = () => {
+  const { user, setUser, loading } = useUser();
+  const router = useRouter();
+
+  const handleLogout = async () => {
+    try {
+      await fetch("http://localhost:8888/auth/logout", {
+        method: "POST",
+        credentials: "include",
+      });
+
+      setUser(null);
+      router.push("/auth/signin");
+    } catch (err) {
+      console.error("Logout failed");
+    }
+  };
+
+  if (loading) return null;
+
   return (
     <nav
       className="
@@ -16,31 +36,47 @@ const Navbar = () => {
         border border-white/10
       "
     >
-      <div className="px-6 py-3 flex items-center justify-between">
-        {/* Logo + Brand */}
-        <div className="flex items-center gap-3">
+      <div className="px-6 py-3 flex items-center justify-between text-white">
+        
+        {/* Logo */}
+        <Link href="/" className="flex items-center gap-3">
           <span className="text-xl">⚔️</span>
-          <span className="text-lg font-semibold tracking-wide text-white">
+          <span className="text-lg font-semibold tracking-wide">
             Code<span className="text-indigo-400">Clash</span>
           </span>
-        </div>
+        </Link>
 
-        {/* Auth Buttons */}
-        <div className="flex items-center gap-4">
-          <Link
-            href="/auth/signin"
-            className="text-sm cursor-pointer text-gray-300 hover:text-white transition"
-          >
-            Sign In
-          </Link>
+        {/* Right Section */}
+        {!user ? (
+          <div className="flex items-center gap-4">
+            <Link
+              href="/auth/signin"
+              className="text-sm text-gray-300 hover:text-white transition"
+            >
+              Sign In
+            </Link>
 
-          <Link
-            href="/auth/signup"
-            className="text-sm px-4 py-1.5 rounded-full bg-indigo-500 hover:bg-indigo-600 text-white transition cursor-pointer"
-          >
-            Sign Up
-          </Link>
-        </div>
+            <Link
+              href="/auth/signup"
+              className="text-sm px-4 py-1.5 rounded-full bg-indigo-500 hover:bg-indigo-600 transition"
+            >
+              Sign Up
+            </Link>
+          </div>
+        ) : (
+          <div className="flex items-center gap-4">
+            <span className="text-sm text-gray-300">
+              Hi, <span className="text-white">{user.username}</span>
+            </span>
+
+            <button
+              onClick={handleLogout}
+              className="text-sm cursor-pointer px-4 py-1.5 rounded-full bg-red-500/80 hover:bg-red-600 transition"
+            >
+              Logout
+            </button>
+          </div>
+        )}
       </div>
     </nav>
   );

@@ -78,7 +78,12 @@ authRouter.post("/signin", async (req, res) => {
     const userInfo = existingUser.toJSON();
 
     const expirationDate = new Date(Date.now() + 24 * 60 * 60 * 1000);
-    res.cookie("token", token, { expires: expirationDate });
+    res.cookie("token", token, {
+      httpOnly: true,
+      secure: false,       // true ONLY in HTTPS (prod)
+      sameSite: "lax",     // IMPORTANT
+      expires: expirationDate,
+    });
     return res.status(200).json({
       message: "Login successful",
       user: userInfo,
