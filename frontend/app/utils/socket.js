@@ -4,5 +4,5 @@ const SOCKET_URL = "http://localhost:8888";
 
 export const socket = io(SOCKET_URL, {
   withCredentials: true,
-  autoConnect: false, 
+  autoConnect: false,
 });

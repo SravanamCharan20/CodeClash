@@ -1,33 +1,49 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { socket } from "../../utils/socket"; // adjust path
+import { socket } from "../../utils/socket";
+import { useRouter } from "next/navigation";
 
 const JoinRoom = () => {
   const [roomId, setRoomId] = useState("");
+  const [socketReady, setSocketReady] = useState(socket.connected);
+  const router = useRouter();
 
   useEffect(() => {
-    socket.connect();
-
-    socket.on("connect", () => {
-      console.log("User socket connected:", socket.id);
-    });
-
-    socket.on("room-joined", (roomId) => {
+    const handleRoomJoined = (roomId) => {
       console.log("✅ Joined room:", roomId);
-    });
+      router.push(`/rooms/lobby?roomId=${roomId}`);
+    };
 
-    socket.on("error", (msg) => {
-      console.error("❌", msg);
-    });
+    const handleConnect = () => {
+      setSocketReady(true);
+    };
+
+    const handleDisconnect = () => {
+      setSocketReady(false);
+    };
+
+    const handleSocketError = (message) => {
+      console.error("❌", message);
+    };
+
+    socket.on("connect", handleConnect);
+    socket.on("disconnect", handleDisconnect);
+    socket.on("room-joined", handleRoomJoined);
+    socket.on("socket-error", handleSocketError);
 
     return () => {
-      socket.disconnect();
+      socket.off("connect", handleConnect);
+      socket.off("disconnect", handleDisconnect);
+      socket.off("room-joined", handleRoomJoined);
+      socket.off("socket-error", handleSocketError);
     };
-  }, []);
+  }, [router]);
 
   const handleJoinRoom = () => {
-    socket.emit("join-room", roomId);
+    const normalizedRoomId = roomId.trim();
+    if (!normalizedRoomId || !socketReady) return;
+    socket.emit("join-room", normalizedRoomId);
   };
 
   return (
@@ -42,7 +58,8 @@ const JoinRoom = () => {
       />
 
       <button
-        className="bg-green-500 border cursor-pointer border-black rounded-sm p-2 text-black m-2"
+        className="bg-green-500 border cursor-pointer border-black rounded-sm p-2 text-black m-2 disabled:opacity-50"
+        disabled={!socketReady}
         onClick={handleJoinRoom}
       >
         Join Room
@@ -50,4 +67,5 @@ const JoinRoom = () => {
     </div>
   );
 };
+
 export default JoinRoom;

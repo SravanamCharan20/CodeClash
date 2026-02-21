@@ -6,39 +6,18 @@ import Link from "next/link";
 
 const Page = () => {
   const { user } = useUser();
-
-  useEffect(() => {
-    socket.connect();
-
-    socket.on("connect", () => {
-      console.log("✅ Connected to socket:", socket.id);
-    });
-
-    socket.on("room-created", (roomId) => {
-      console.log("✅ Room created:", roomId);
-    });
-
-    return () => {
-      socket.disconnect();
-    };
-  }, []);
-
+    // console.log(user)
   if (!user) return null;
-
-  const handleCreateRoom = () => {
-    socket.emit("create-room");
-  };
-
   // 🔐 ADMIN VIEW
   if (user.role === "admin") {
     return (
       <>
-        <button
-          onClick={handleCreateRoom}
+        <Link
+          href="/rooms/createRoom"
           className="bg-green-500 border cursor-pointer border-black rounded-sm p-2 text-black m-2"
         >
-          Create Room
-        </button>
+          create Room
+        </Link>
 
         <Link
           href="/rooms/joinRoom"
