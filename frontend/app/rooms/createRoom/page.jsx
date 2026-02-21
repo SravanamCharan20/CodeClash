@@ -1,6 +1,6 @@
 import React from 'react'
 
-const Joinroom = () => {
+const createRoom = () => {
   return (
     <div>
       
@@ -8,4 +8,4 @@ const Joinroom = () => {
   )
 }
 
-export default Joinroom
+export default createRoom
