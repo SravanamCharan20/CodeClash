@@ -74,6 +74,7 @@ const Navbar = () => {
           </div>
         ) : (
           <div className="flex items-center gap-4">
+            <Link href="/dashboard">Dashboard</Link>
             <span className="text-sm text-gray-300">
               Hi,{" "}
               <span className="text-white font-medium">
