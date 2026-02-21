@@ -23,8 +23,9 @@ export default function Signin() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
       });
-
+      
       const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Signin failed");
 
       setUser(data.user);
       setSuccess("Welcome back! Let’s get coding ⚡");

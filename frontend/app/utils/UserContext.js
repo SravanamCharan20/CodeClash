@@ -1,12 +1,12 @@
-'use client';
+"use client";
 import { createContext, useContext, useEffect, useState } from "react";
-
+import { useRouter } from "next/navigation";
 const UserContext = createContext(null);
 
 export const UserProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
-
+  const router = useRouter();
   useEffect(() => {
     const fetchProfile = async () => {
       try {
@@ -14,7 +14,10 @@ export const UserProvider = ({ children }) => {
           credentials: "include",
         });
 
-        if (!res.ok) throw new Error("Not authenticated");
+        if (!res.ok) {
+          router.push("/auth/signin");
+          throw new Error("Not authenticated");
+        }
 
         const data = await res.json();
         setUser(data.user);
