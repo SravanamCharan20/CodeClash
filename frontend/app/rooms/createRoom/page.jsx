@@ -94,19 +94,51 @@ const CreateRoom = () => {
   };
 
   return (
-    <div>
-      <h1>Create Clash</h1>
+    <main className="arena-page arena-grid-bg flex items-center justify-center px-3 py-4">
+      <section className="w-full max-w-xl rounded-xl border border-[var(--arena-border)] bg-[var(--arena-panel)]/90 p-6 sm:p-8">
+        <h1 className="text-2xl font-semibold text-white sm:text-3xl">
+          Create Room
+        </h1>
+        <p className="mt-2 text-sm text-[var(--arena-muted)]">
+          Generate a private room code and move to lobby.
+        </p>
 
-      <button
-        disabled={!socketReady || isCreating}
-        onClick={handleCreateRoom}
-        className="bg-green-500 disabled:opacity-50 border cursor-pointer border-black rounded-sm p-2 text-black m-2"
-      >
-        {isCreating ? "Creating..." : "Set"}
-      </button>
+        <div className="mt-6 rounded-lg border border-[var(--arena-border)] bg-black/35 p-4">
+          <p className="text-xs uppercase tracking-[0.14em] text-[var(--arena-muted)]">
+            Connection
+          </p>
+          <p
+            className={`mt-1 text-sm font-medium ${
+              socketReady ? "text-[var(--arena-green)]" : "text-red-400"
+            }`}
+          >
+            {socketReady ? "Connected" : "Disconnected"}
+          </p>
+        </div>
 
-      {error && <p className="text-red-500 m-2">{error}</p>}
-    </div>
+        <button
+          disabled={!socketReady || isCreating}
+          onClick={handleCreateRoom}
+          className="mt-6 flex h-11 w-full items-center justify-center rounded-md bg-[var(--arena-green)] text-sm font-semibold text-black transition hover:bg-[var(--arena-green-strong)] disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {isCreating ? "Creating room..." : "Create Room"}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => router.push("/dashboard")}
+          className="mt-3 flex h-11 w-full items-center justify-center rounded-md border border-[var(--arena-border)] bg-[var(--arena-panel-soft)] text-sm font-semibold text-white transition hover:bg-[#202025]"
+        >
+          Back to Dashboard
+        </button>
+
+        {error && (
+          <p className="mt-4 rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+            {error}
+          </p>
+        )}
+      </section>
+    </main>
   );
 };
 

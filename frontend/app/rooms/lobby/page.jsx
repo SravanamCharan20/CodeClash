@@ -85,6 +85,11 @@ export default function Lobby() {
       router.push(`/rooms/devarena?roomId=${roomId}`);
     };
 
+    const handleRoomResume = ({ roomId: resumedRoomId } = {}) => {
+      if (resumedRoomId !== roomId) return;
+      router.push(`/rooms/devarena?roomId=${roomId}`);
+    };
+
     const handleSocketError = (payload) => {
       resetPendingState();
       setError(getSocketErrorMessage(payload, "Socket error"));
@@ -100,6 +105,7 @@ export default function Lobby() {
     socket.on("disconnect", handleDisconnect);
     socket.on("lobby-update", handleLobbyUpdate);
     socket.on("room-started", handleRoomStarted);
+    socket.on("room-resume", handleRoomResume);
     socket.on("socket-error", handleSocketError);
     socket.on("connect_error", handleConnectError);
 
@@ -113,6 +119,7 @@ export default function Lobby() {
       socket.off("disconnect", handleDisconnect);
       socket.off("lobby-update", handleLobbyUpdate);
       socket.off("room-started", handleRoomStarted);
+      socket.off("room-resume", handleRoomResume);
       socket.off("socket-error", handleSocketError);
       socket.off("connect_error", handleConnectError);
     };
@@ -163,63 +170,133 @@ export default function Lobby() {
   };
 
   if (!roomIdValid) {
-    return <p className="text-red-500 m-2">Invalid room id</p>;
+    return (
+      <main className="arena-page arena-grid-bg flex items-center justify-center">
+        <p className="rounded-md border border-red-500/40 bg-red-500/10 px-4 py-2 text-sm text-red-300">
+          Invalid room id
+        </p>
+      </main>
+    );
   }
 
   return (
-    <div>
-      <h1>Lobby</h1>
+    <main className="arena-page arena-grid-bg px-1 pb-6 pt-2 sm:px-2">
+      <section className="mx-auto grid w-full max-w-5xl gap-4 lg:grid-cols-[0.9fr_1.1fr]">
+        <aside className="rounded-xl border border-[var(--arena-border)] bg-[var(--arena-panel)]/90 p-5">
+          <h1 className="text-xl font-semibold text-white">Lobby</h1>
 
-      <p>
-        Room ID: <strong>{roomId}</strong>
-      </p>
-      <p>Status: {roomStatus}</p>
-      <p>Connection: {socketReady ? "Connected" : "Disconnected"}</p>
+          <div className="mt-5 space-y-3 text-sm">
+            <div className="rounded-md border border-[var(--arena-border)] bg-black/30 px-3 py-2">
+              <p className="text-xs uppercase tracking-[0.12em] text-[var(--arena-muted)]">
+                Room ID
+              </p>
+              <p className="mt-1 font-semibold tracking-[0.14em] text-white">
+                {roomId}
+              </p>
+            </div>
 
-      <h3>Participants</h3>
-      <ul>
-        {members.map((member, index) => (
-          <li key={`${member.userId}-${index}`}>
-            {member.username}
-            {member.role === "admin" ? " (Admin)" : ""}
-            {" - "}
-            {member.ready ? "Ready" : "Not Ready"}
-          </li>
-        ))}
-      </ul>
+            <div className="rounded-md border border-[var(--arena-border)] bg-black/30 px-3 py-2">
+              <p className="text-xs uppercase tracking-[0.12em] text-[var(--arena-muted)]">
+                Status
+              </p>
+              <p className="mt-1 font-medium text-white">{roomStatus}</p>
+            </div>
 
-      {me && (
-        <button
-          className="bg-green-500 disabled:opacity-50 border cursor-pointer border-black rounded-sm p-2 text-black m-2"
-          disabled={!socketReady || roomStatus !== "lobby" || isReadyActionPending}
-          onClick={handleToggleReady}
-        >
-          {isReadyActionPending
-            ? "Updating..."
-            : me.ready
-            ? "Unready"
-            : "Ready"}
-        </button>
-      )}
+            <div className="rounded-md border border-[var(--arena-border)] bg-black/30 px-3 py-2">
+              <p className="text-xs uppercase tracking-[0.12em] text-[var(--arena-muted)]">
+                Connection
+              </p>
+              <p
+                className={`mt-1 font-medium ${
+                  socketReady ? "text-[var(--arena-green)]" : "text-red-400"
+                }`}
+              >
+                {socketReady ? "Connected" : "Disconnected"}
+              </p>
+            </div>
 
-      {isAdmin && (
-        <button
-          disabled={
-            !socketReady ||
-            roomStatus !== "lobby" ||
-            !canStart ||
-            isStartActionPending
-          }
-          className="bg-blue-500 disabled:opacity-50 border cursor-pointer border-black rounded-sm p-2 text-black m-2"
-          onClick={handleStartRoom}
-        >
-          {isStartActionPending ? "Starting..." : "Start Room"}
-        </button>
-      )}
+            <div className="rounded-md border border-[var(--arena-border)] bg-black/30 px-3 py-2">
+              <p className="text-xs uppercase tracking-[0.12em] text-[var(--arena-muted)]">
+                All Ready
+              </p>
+              <p className="mt-1 font-medium text-white">
+                {allReady ? "Yes" : "No"}
+              </p>
+            </div>
+          </div>
+        </aside>
 
-      <p>All Ready: {allReady ? "Yes" : "No"}</p>
+        <section className="rounded-xl border border-[var(--arena-border)] bg-[var(--arena-panel)]/90 p-5">
+          <h2 className="text-lg font-semibold text-white">Participants</h2>
+          <ul className="mt-4 space-y-3">
+            {members.map((member, index) => (
+              <li
+                key={`${member.userId}-${index}`}
+                className="flex items-center justify-between gap-3 rounded-md border border-[var(--arena-border)] bg-[var(--arena-panel-soft)] px-3 py-2"
+              >
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium text-white">
+                    {member.username}
+                    {member.role === "admin" && (
+                      <span className="ml-2 text-xs text-[var(--arena-green)]">
+                        ADMIN
+                      </span>
+                    )}
+                  </p>
+                </div>
+                <span
+                  className={`shrink-0 rounded-full px-2 py-1 text-xs font-semibold ${
+                    member.ready
+                      ? "bg-green-500/15 text-green-300"
+                      : "bg-neutral-700/40 text-neutral-300"
+                  }`}
+                >
+                  {member.ready ? "READY" : "WAITING"}
+                </span>
+              </li>
+            ))}
+          </ul>
 
-      {error && <p className="text-red-500">{error}</p>}
-    </div>
+          <div className="mt-5 grid gap-3 sm:grid-cols-2">
+            {me && (
+              <button
+                className="h-11 rounded-md bg-[var(--arena-green)] text-sm font-semibold text-black transition hover:bg-[var(--arena-green-strong)] disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={
+                  !socketReady || roomStatus !== "lobby" || isReadyActionPending
+                }
+                onClick={handleToggleReady}
+              >
+                {isReadyActionPending
+                  ? "Updating..."
+                  : me.ready
+                  ? "Set Not Ready"
+                  : "Ready Up"}
+              </button>
+            )}
+
+            {isAdmin && (
+              <button
+                disabled={
+                  !socketReady ||
+                  roomStatus !== "lobby" ||
+                  !canStart ||
+                  isStartActionPending
+                }
+                className="h-11 rounded-md border border-[var(--arena-border)] bg-[#1f2937] text-sm font-semibold text-white transition hover:bg-[#273447] disabled:cursor-not-allowed disabled:opacity-60"
+                onClick={handleStartRoom}
+              >
+                {isStartActionPending ? "Starting..." : "Start Room"}
+              </button>
+            )}
+          </div>
+
+          {error && (
+            <p className="mt-4 rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+              {error}
+            </p>
+          )}
+        </section>
+      </section>
+    </main>
   );
 }

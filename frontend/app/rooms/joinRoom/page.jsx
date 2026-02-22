@@ -47,6 +47,19 @@ const JoinRoom = () => {
       router.push(`/rooms/lobby?roomId=${roomId}`);
     };
 
+    const handleRoomResume = ({ roomId } = {}) => {
+      clearJoinCooldown();
+      setIsJoining(false);
+      setError("");
+
+      if (!ROOM_ID_REGEX.test(roomId || "")) {
+        setError("Server returned an invalid room ID");
+        return;
+      }
+
+      router.push(`/rooms/devarena?roomId=${roomId}`);
+    };
+
     const handleConnect = () => {
       setSocketReady(true);
       setError("");
@@ -73,6 +86,7 @@ const JoinRoom = () => {
     socket.on("connect", handleConnect);
     socket.on("disconnect", handleDisconnect);
     socket.on("room-joined", handleRoomJoined);
+    socket.on("room-resume", handleRoomResume);
     socket.on("socket-error", handleSocketError);
     socket.on("connect_error", handleConnectError);
 
@@ -81,6 +95,7 @@ const JoinRoom = () => {
       socket.off("connect", handleConnect);
       socket.off("disconnect", handleDisconnect);
       socket.off("room-joined", handleRoomJoined);
+      socket.off("room-resume", handleRoomResume);
       socket.off("socket-error", handleSocketError);
       socket.off("connect_error", handleConnectError);
     };
@@ -111,29 +126,51 @@ const JoinRoom = () => {
   };
 
   return (
-    <div>
-      <h1>Join Room</h1>
+    <main className="arena-page arena-grid-bg flex items-center justify-center px-3 py-4">
+      <section className="w-full max-w-xl rounded-xl border border-[var(--arena-border)] bg-[var(--arena-panel)]/90 p-6 sm:p-8">
+        <h1 className="text-2xl font-semibold text-white sm:text-3xl">
+          Join Room
+        </h1>
+        <p className="mt-2 text-sm text-[var(--arena-muted)]">
+          Enter the room code shared by your friend.
+        </p>
 
-      <input
-        placeholder="Enter Room ID"
-        value={roomId}
-        className="border border-green-500 m-3 p-2"
-        onChange={(e) => {
-          setRoomId(normalizeRoomInput(e.target.value));
-          setError("");
-        }}
-      />
+        <label className="mt-6 block text-xs uppercase tracking-[0.14em] text-[var(--arena-muted)]">
+          Room Code
+        </label>
+        <input
+          placeholder="ENTER CODE"
+          value={roomId}
+          className="mt-2 h-11 w-full rounded-md border border-[var(--arena-border)] bg-[var(--arena-panel-soft)] px-3 text-center text-sm font-semibold tracking-[0.18em] text-white outline-none placeholder:text-[#71717a] focus:border-[var(--arena-green)]"
+          onChange={(e) => {
+            setRoomId(normalizeRoomInput(e.target.value));
+            setError("");
+          }}
+        />
 
-      <button
-        className="bg-green-500 border cursor-pointer border-black rounded-sm p-2 text-black m-2 disabled:opacity-50"
-        disabled={!socketReady || isJoining}
-        onClick={handleJoinRoom}
-      >
-        {isJoining ? "Joining..." : "Join Room"}
-      </button>
+        <button
+          className="mt-6 flex h-11 w-full items-center justify-center rounded-md bg-[var(--arena-green)] text-sm font-semibold text-black transition hover:bg-[var(--arena-green-strong)] disabled:cursor-not-allowed disabled:opacity-60"
+          disabled={!socketReady || isJoining}
+          onClick={handleJoinRoom}
+        >
+          {isJoining ? "Joining..." : "Join Room"}
+        </button>
 
-      {error && <p className="text-red-500 m-2">{error}</p>}
-    </div>
+        <button
+          type="button"
+          onClick={() => router.push("/dashboard")}
+          className="mt-3 flex h-11 w-full items-center justify-center rounded-md border border-[var(--arena-border)] bg-[var(--arena-panel-soft)] text-sm font-semibold text-white transition hover:bg-[#202025]"
+        >
+          Back to Dashboard
+        </button>
+
+        {error && (
+          <p className="mt-4 rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+            {error}
+          </p>
+        )}
+      </section>
+    </main>
   );
 };
 

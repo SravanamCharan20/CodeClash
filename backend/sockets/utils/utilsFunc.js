@@ -224,10 +224,15 @@ export const removeSocketFromRoom = (
   socket.data.roomId = undefined;
   console.log(`${user.username} left room ${roomId}`);
 
-  if (room.members.size === 0) {
+  // Keep started rooms available for eligible participant re-joins.
+  if (room.members.size === 0 && room.status !== "started") {
     rooms.delete(roomId);
     console.log(`Room deleted: ${roomId}`);
     return;
+  }
+
+  if (room.status === "started") {
+    room.abandonedAt = room.members.size === 0 ? Date.now() : null;
   }
 
   emitLobbyUpdate(io, rooms, roomId, maxMembers);

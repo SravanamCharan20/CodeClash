@@ -14,10 +14,47 @@ import {
   resolveUserFromSocket,
 } from "./utils/utilsFunc.js";
 
-// roomId -> { status, createdAt, startedAt, members(Map(socketId -> member)) }
+const parsePositiveInt = (value, fallback) => {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+};
+
+const STARTED_ROOM_TTL_MS = parsePositiveInt(
+  process.env.STARTED_ROOM_TTL_MS,
+  30 * 60 * 1000
+);
+const STARTED_ROOM_CLEANUP_TICK_MS = parsePositiveInt(
+  process.env.STARTED_ROOM_CLEANUP_TICK_MS,
+  60 * 1000
+);
+
+// roomId -> { status, createdAt, startedAt, abandonedAt, members(Map(socketId -> member)), participantUserIds(Set(userId)) }
 const rooms = new Map();
+let startedRoomCleanupInterval;
 
 export const initSocket = (io) => {
+  if (!startedRoomCleanupInterval) {
+    startedRoomCleanupInterval = setInterval(() => {
+      const now = Date.now();
+      for (const [roomId, room] of rooms.entries()) {
+        if (room.status !== "started" || room.members.size > 0) {
+          continue;
+        }
+
+        if (!room.abandonedAt) {
+          room.abandonedAt = now;
+          continue;
+        }
+
+        if (now - room.abandonedAt >= STARTED_ROOM_TTL_MS) {
+          rooms.delete(roomId);
+          console.log(`Started room cleaned up: ${roomId}`);
+        }
+      }
+    }, STARTED_ROOM_CLEANUP_TICK_MS);
+    startedRoomCleanupInterval.unref?.();
+  }
+
   io.use(async (socket, next) => {
     try {
       const user = await resolveUserFromSocket(socket, User);
@@ -79,7 +116,9 @@ export const initSocket = (io) => {
         status: "lobby",
         createdAt: Date.now(),
         startedAt: null,
+        abandonedAt: null,
         members: new Map(),
+        participantUserIds: new Set([socket.data.user.userId]),
       };
 
       room.members.set(socket.id, { ...socket.data.user, ready: false });
@@ -113,11 +152,6 @@ export const initSocket = (io) => {
         return;
       }
 
-      if (room.status !== "lobby") {
-        emitSocketError("Room has already started");
-        return;
-      }
-
       let previousReadyState = false;
       for (const [memberSocketId, member] of room.members.entries()) {
         if (member.userId === socket.data.user.userId) {
@@ -130,11 +164,23 @@ export const initSocket = (io) => {
         }
       }
 
-      if (
-        room.members.size >= MAX_MEMBERS_PER_ROOM &&
-        !room.members.has(socket.id)
-      ) {
-        emitSocketError("Room is full");
+      const isStartedRoom = room.status === "started";
+
+      if (isStartedRoom) {
+        if (!room.participantUserIds?.has(socket.data.user.userId)) {
+          emitSocketError("Room has already started");
+          return;
+        }
+      } else if (room.status === "lobby") {
+        if (
+          room.members.size >= MAX_MEMBERS_PER_ROOM &&
+          !room.members.has(socket.id)
+        ) {
+          emitSocketError("Room is full");
+          return;
+        }
+      } else {
+        emitSocketError("Room is not available");
         return;
       }
 
@@ -147,10 +193,18 @@ export const initSocket = (io) => {
         ...socket.data.user,
         ready: previousReadyState,
       });
+      room.abandonedAt = null;
+      if (!isStartedRoom) {
+        room.participantUserIds?.add(socket.data.user.userId);
+      }
       socket.data.roomId = roomId;
 
       console.log(`${socket.data.user.username} joined room ${roomId}`);
-      socket.emit("room-joined", roomId);
+      if (isStartedRoom) {
+        socket.emit("room-resume", { roomId });
+      } else {
+        socket.emit("room-joined", roomId);
+      }
       emitLobbyUpdate(io, rooms, roomId, MAX_MEMBERS_PER_ROOM);
     });
 
@@ -239,6 +293,7 @@ export const initSocket = (io) => {
 
       room.status = "started";
       room.startedAt = Date.now();
+      room.abandonedAt = null;
       emitLobbyUpdate(io, rooms, roomId, MAX_MEMBERS_PER_ROOM);
       io.to(roomId).emit("room-started", { roomId });
     });
