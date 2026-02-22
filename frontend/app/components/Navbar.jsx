@@ -93,13 +93,13 @@ export default function Navbar() {
           <div className="flex items-center gap-2">
             <Link
               href="/auth/signin"
-              className="rounded-full border border-white/15 px-3 py-1.5 text-sm text-neutral-100 transition hover:bg-neutral-800"
+              className="rounded-full border cursor-pointer border-white/15 px-3 py-1.5 text-sm text-neutral-100 transition hover:bg-neutral-800"
             >
               Sign In
             </Link>
             <Link
               href="/auth/signup"
-              className="rounded-full bg-[var(--arena-green)] px-3 py-1.5 text-sm font-semibold text-black transition hover:bg-[var(--arena-green-strong)]"
+              className="rounded-full bg-[var(--arena-green)] cursor-pointer px-3 py-1.5 text-sm font-semibold text-black transition hover:bg-[var(--arena-green-strong)]"
             >
               Sign Up
             </Link>
@@ -166,7 +166,7 @@ export default function Navbar() {
                 <button
                   type="button"
                   onClick={handleLogout}
-                  className="mt-1 flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-red-300 transition hover:bg-red-500/10"
+                  className="mt-1 flex w-full cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-red-300 transition hover:bg-red-500/10"
                 >
                   <LogOut className="h-4 w-4" />
                   Logout
