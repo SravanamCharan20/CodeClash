@@ -3,6 +3,7 @@
 import { createContext, useContext, useEffect } from "react";
 import { socket } from "./socket";
 import { useUser } from "../utils/UserContext";
+import { getSocketErrorMessage } from "./socketError";
 
 const SocketContext = createContext(null);
 
@@ -22,12 +23,15 @@ export const SocketProvider = ({ children }) => {
     const identifyUser = () => {
       socket.emit("identify-user", {
         userId: user._id,
-        username: user.username,
-        role: user.role,
       });
     };
 
+    const handleConnectError = (error) => {
+      console.error("Socket connect error:", getSocketErrorMessage(error));
+    };
+
     socket.on("connect", identifyUser);
+    socket.on("connect_error", handleConnectError);
 
     if (!socket.connected) {
       socket.connect();
@@ -37,6 +41,7 @@ export const SocketProvider = ({ children }) => {
 
     return () => {
       socket.off("connect", identifyUser);
+      socket.off("connect_error", handleConnectError);
     };
   }, [user, loading]);
 
