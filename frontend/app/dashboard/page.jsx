@@ -1,7 +1,6 @@
 "use client";
 import React, { useEffect } from "react";
 import { useUser } from "../utils/UserContext";
-import { socket } from "../utils/socket";
 import Link from "next/link";
 
 const Page = () => {
