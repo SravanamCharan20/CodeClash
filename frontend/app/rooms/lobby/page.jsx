@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { socket } from "../../utils/socket";
 import { useUser } from "../../utils/UserContext";
@@ -10,7 +10,7 @@ const ROOM_ID_REGEX = /^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{7}$/;
 const READY_COOLDOWN_MS = 700;
 const START_COOLDOWN_MS = 1200;
 
-export default function Lobby() {
+function LobbyContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const { user } = useUser();
@@ -88,7 +88,9 @@ export default function Lobby() {
           : null
       );
       const nextStatus =
-        payload.status === "started" || payload.status === "countdown"
+        payload.status === "started" ||
+        payload.status === "countdown" ||
+        payload.status === "finished"
           ? payload.status
           : "lobby";
       setRoomStatus(nextStatus);
@@ -328,6 +330,22 @@ export default function Lobby() {
 
             {hasProblemSet && (
               <ul className="mt-2 space-y-1">
+                <li className="text-xs text-[var(--arena-muted)]">
+                  Duration:{" "}
+                  {Math.max(
+                    1,
+                    Math.round(
+                      Number.isFinite(problemSet.durationSeconds)
+                        ? problemSet.durationSeconds / 60
+                        : 15
+                    )
+                  )}{" "}
+                  min • Penalty:{" "}
+                  {Number.isFinite(problemSet.penaltySeconds)
+                    ? problemSet.penaltySeconds
+                    : 20}
+                  s
+                </li>
                 {(Array.isArray(problemSet.problems) ? problemSet.problems : []).map((problem) => (
                   <li key={problem.id} className="text-sm text-white/90">
                     {problem.title}{" "}
@@ -398,5 +416,19 @@ export default function Lobby() {
         </section>
       )}
     </main>
+  );
+}
+
+export default function Lobby() {
+  return (
+    <Suspense
+      fallback={
+        <main className="arena-page arena-grid-bg flex items-center justify-center px-4">
+          <div className="h-40 w-full max-w-5xl animate-pulse rounded-xl border border-[var(--arena-border)] bg-[var(--arena-panel)]/60" />
+        </main>
+      }
+    >
+      <LobbyContent />
+    </Suspense>
   );
 }

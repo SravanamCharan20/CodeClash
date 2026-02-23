@@ -1,0 +1,38 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: codeclash-backend
+    env_file:
+      - ./backend/.env
+    environment:
+      PORT: "8888"
+      FRONTEND_URL: "${FRONTEND_URL:-http://localhost:3000}"
+      DOCKER_JS_IMAGE: "node:20-alpine"
+      DOCKER_PY_IMAGE: "python:3.12-alpine"
+      DOCKER_EXEC_TIMEOUT_MS: "20000"
+      DOCKER_EXEC_MEMORY: "256m"
+      DOCKER_EXEC_CPUS: "0.5"
+      DOCKER_EXEC_PIDS: "128"
+    ports:
+      - "${BACKEND_PORT:-8888}:8888"
+    volumes:
+      - ${DOCKER_SOCKET_PATH:-/var/run/docker.sock}:/var/run/docker.sock
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: codeclash-frontend
+    env_file:
+      - ./frontend/.env
+    environment:
+      NEXT_PUBLIC_SOCKET_URL: "${NEXT_PUBLIC_SOCKET_URL:-http://localhost:8888}"
+      NODE_ENV: "production"
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    depends_on:
+      - backend
+    restart: unless-stopped

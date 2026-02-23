@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { socket } from "../../utils/socket";
 import { useUser } from "../../utils/UserContext";
@@ -19,7 +19,7 @@ const toggleListValue = (current, value) =>
     ? current.filter((item) => item !== value)
     : [...current, value];
 
-export default function ProblemSetupPage() {
+function ProblemSetupContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { user, loading } = useUser();
@@ -35,10 +35,13 @@ export default function ProblemSetupPage() {
   const [selectedDifficulties, setSelectedDifficulties] = useState([]);
   const [selectedProblemIds, setSelectedProblemIds] = useState([]);
   const [search, setSearch] = useState("");
+  const [durationMinutes, setDurationMinutes] = useState(15);
+  const [penaltySeconds, setPenaltySeconds] = useState(20);
   const [loadingCatalog, setLoadingCatalog] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState("");
   const hydratedSelectionRef = useRef(false);
+  const hydratedConfigRef = useRef(false);
 
   const problemById = useMemo(() => {
     const lookup = new Map();
@@ -58,6 +61,7 @@ export default function ProblemSetupPage() {
 
   useEffect(() => {
     hydratedSelectionRef.current = false;
+    hydratedConfigRef.current = false;
   }, [roomId]);
 
   useEffect(() => {
@@ -111,7 +115,35 @@ export default function ProblemSetupPage() {
       if (!hydratedSelectionRef.current && serverSelectedIds.length > 0) {
         setSelectedProblemIds(serverSelectedIds.slice(0, MAX_PROBLEMS_PER_ROOM));
       }
+      if (!hydratedConfigRef.current) {
+        const configuredDurationSeconds = Number.parseInt(
+          payload.selectedProblemSet?.durationSeconds,
+          10
+        );
+        if (
+          Number.isFinite(configuredDurationSeconds) &&
+          configuredDurationSeconds > 0
+        ) {
+          setDurationMinutes(
+            Math.max(2, Math.min(120, Math.round(configuredDurationSeconds / 60)))
+          );
+        }
+
+        const configuredPenaltySeconds = Number.parseInt(
+          payload.selectedProblemSet?.penaltySeconds,
+          10
+        );
+        if (
+          Number.isFinite(configuredPenaltySeconds) &&
+          configuredPenaltySeconds >= 0
+        ) {
+          setPenaltySeconds(
+            Math.max(0, Math.min(300, configuredPenaltySeconds))
+          );
+        }
+      }
       hydratedSelectionRef.current = true;
+      hydratedConfigRef.current = true;
     };
 
     const handleProblemsSet = ({ roomId: configuredRoomId } = {}) => {
@@ -210,6 +242,14 @@ export default function ProblemSetupPage() {
       setError("Select at least one problem");
       return;
     }
+    if (!Number.isFinite(durationMinutes) || durationMinutes < 2 || durationMinutes > 120) {
+      setError("Duration must be between 2 and 120 minutes");
+      return;
+    }
+    if (!Number.isFinite(penaltySeconds) || penaltySeconds < 0 || penaltySeconds > 300) {
+      setError("Penalty must be between 0 and 300 seconds");
+      return;
+    }
     if (isSaving) return;
 
     setError("");
@@ -217,6 +257,8 @@ export default function ProblemSetupPage() {
     socket.emit("set-room-problems", {
       roomId,
       problemIds: selectedProblemIds,
+      durationSeconds: durationMinutes * 60,
+      penaltySeconds,
     });
   };
 
@@ -274,6 +316,44 @@ export default function ProblemSetupPage() {
             <p className="mt-1 font-semibold tracking-[0.14em] text-white">
               {roomId}
             </p>
+          </div>
+
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <div>
+              <label className="block text-xs uppercase tracking-[0.12em] text-[var(--arena-muted)]">
+                Duration (min)
+              </label>
+              <input
+                type="number"
+                min={2}
+                max={120}
+                value={durationMinutes}
+                onChange={(event) =>
+                  setDurationMinutes(
+                    Number.parseInt(event.target.value || "0", 10) || 0
+                  )
+                }
+                className="mt-2 h-10 w-full rounded-md border border-[var(--arena-border)] bg-[var(--arena-panel-soft)] px-3 text-sm text-white outline-none focus:border-[var(--arena-green)]"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs uppercase tracking-[0.12em] text-[var(--arena-muted)]">
+                Penalty (sec)
+              </label>
+              <input
+                type="number"
+                min={0}
+                max={300}
+                value={penaltySeconds}
+                onChange={(event) =>
+                  setPenaltySeconds(
+                    Number.parseInt(event.target.value || "0", 10) || 0
+                  )
+                }
+                className="mt-2 h-10 w-full rounded-md border border-[var(--arena-border)] bg-[var(--arena-panel-soft)] px-3 text-sm text-white outline-none focus:border-[var(--arena-green)]"
+              />
+            </div>
           </div>
 
           <label className="mt-4 block text-xs uppercase tracking-[0.12em] text-[var(--arena-muted)]">
@@ -444,6 +524,9 @@ export default function ProblemSetupPage() {
                         <p className="mt-1 text-xs uppercase tracking-[0.08em] text-[var(--arena-muted)]">
                           {problem.topics.join(" • ")}
                         </p>
+                        <p className="mt-2 text-xs leading-relaxed text-[var(--arena-muted)]">
+                          {problem.statement}
+                        </p>
                         <p className="mt-1 text-xs text-[#9fb4cb]">
                           {problem.tags.join(", ")}
                         </p>
@@ -479,5 +562,19 @@ export default function ProblemSetupPage() {
         </section>
       </section>
     </main>
+  );
+}
+
+export default function ProblemSetupPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="arena-page arena-grid-bg flex items-center justify-center px-4">
+          <div className="h-40 w-full max-w-6xl animate-pulse rounded-xl border border-[var(--arena-border)] bg-[var(--arena-panel)]/60" />
+        </main>
+      }
+    >
+      <ProblemSetupContent />
+    </Suspense>
   );
 }
