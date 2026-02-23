@@ -2,16 +2,22 @@
 import User from "../models/User.js";
 import {
   CLIENT_EVENTS,
+  MAX_PROBLEMS_PER_ROOM,
   MAX_MEMBERS_PER_ROOM,
+  PROBLEM_MAP,
   ROOM_ID_REGEX,
   buildLobbyState,
   checkRateLimit,
   createUniqueRoomId,
   emitLobbyUpdate,
   extractRoomId,
+  getFilteredProblemCatalog,
+  getProblemCatalogFacets,
+  normalizeProblemIds,
   registerAbuse,
   removeSocketFromRoom,
   resolveUserFromSocket,
+  toPublicProblemSet,
 } from "./utils/utilsFunc.js";
 
 const parsePositiveInt = (value, fallback) => {
@@ -27,10 +33,95 @@ const STARTED_ROOM_CLEANUP_TICK_MS = parsePositiveInt(
   process.env.STARTED_ROOM_CLEANUP_TICK_MS,
   60 * 1000
 );
+const ROOM_COUNTDOWN_SECONDS = Math.min(
+  parsePositiveInt(process.env.ROOM_COUNTDOWN_SECONDS, 3),
+  10
+);
 
-// roomId -> { status, createdAt, startedAt, abandonedAt, members(Map(socketId -> member)), participantUserIds(Set(userId)) }
+// roomId -> { status, createdAt, startedAt, countdownEndsAt, abandonedAt, members(Map(socketId -> member)), participantUserIds(Set(userId)), problemSet }
 const rooms = new Map();
 let startedRoomCleanupInterval;
+const roomCountdownTimers = new Map();
+
+const clearRoomCountdown = (roomId) => {
+  const activeCountdown = roomCountdownTimers.get(roomId);
+  if (!activeCountdown) return;
+
+  clearInterval(activeCountdown.intervalId);
+  clearTimeout(activeCountdown.finishTimeoutId);
+  roomCountdownTimers.delete(roomId);
+};
+
+const getCountdownSecondsLeft = (countdownEndsAt) => {
+  if (!countdownEndsAt) return 0;
+  const remainingMs = countdownEndsAt - Date.now();
+  if (remainingMs <= 0) return 0;
+  return Math.ceil(remainingMs / 1000);
+};
+
+const emitCountdownTick = (io, roomId, countdownEndsAt) => {
+  const secondsLeft = getCountdownSecondsLeft(countdownEndsAt);
+  if (secondsLeft <= 0) return 0;
+  io.to(roomId).emit("room-countdown", {
+    roomId,
+    secondsLeft,
+    countdownEndsAt,
+  });
+  return secondsLeft;
+};
+
+const isUserActiveMember = (room, userId) => {
+  for (const member of room.members.values()) {
+    if (member.userId === userId) return true;
+  }
+  return false;
+};
+
+const startRoomCountdown = (io, roomId) => {
+  const room = rooms.get(roomId);
+  if (!room || room.status !== "lobby") return;
+
+  clearRoomCountdown(roomId);
+
+  room.status = "countdown";
+  room.countdownEndsAt = Date.now() + ROOM_COUNTDOWN_SECONDS * 1000;
+  room.abandonedAt = null;
+
+  emitLobbyUpdate(io, rooms, roomId, MAX_MEMBERS_PER_ROOM);
+  emitCountdownTick(io, roomId, room.countdownEndsAt);
+
+  const intervalId = setInterval(() => {
+    const latestRoom = rooms.get(roomId);
+    if (!latestRoom || latestRoom.status !== "countdown") {
+      clearRoomCountdown(roomId);
+      return;
+    }
+
+    emitCountdownTick(io, roomId, latestRoom.countdownEndsAt);
+  }, 1000);
+
+  const finishTimeoutId = setTimeout(() => {
+    clearRoomCountdown(roomId);
+    const latestRoom = rooms.get(roomId);
+    if (!latestRoom || latestRoom.status !== "countdown") return;
+
+    latestRoom.status = "started";
+    latestRoom.startedAt = Date.now();
+    latestRoom.countdownEndsAt = null;
+    latestRoom.abandonedAt =
+      latestRoom.members.size === 0 ? Date.now() : null;
+
+    emitLobbyUpdate(io, rooms, roomId, MAX_MEMBERS_PER_ROOM);
+    io.to(roomId).emit("room-started", {
+      roomId,
+      startedAt: latestRoom.startedAt,
+    });
+  }, ROOM_COUNTDOWN_SECONDS * 1000 + 100);
+
+  intervalId.unref?.();
+  finishTimeoutId.unref?.();
+  roomCountdownTimers.set(roomId, { intervalId, finishTimeoutId });
+};
 
 export const initSocket = (io) => {
   if (!startedRoomCleanupInterval) {
@@ -47,6 +138,7 @@ export const initSocket = (io) => {
         }
 
         if (now - room.abandonedAt >= STARTED_ROOM_TTL_MS) {
+          clearRoomCountdown(roomId);
           rooms.delete(roomId);
           console.log(`Started room cleaned up: ${roomId}`);
         }
@@ -116,9 +208,11 @@ export const initSocket = (io) => {
         status: "lobby",
         createdAt: Date.now(),
         startedAt: null,
+        countdownEndsAt: null,
         abandonedAt: null,
         members: new Map(),
         participantUserIds: new Set([socket.data.user.userId]),
+        problemSet: null,
       };
 
       room.members.set(socket.id, { ...socket.data.user, ready: false });
@@ -128,6 +222,128 @@ export const initSocket = (io) => {
 
       console.log(`Room created: ${roomId} by ${socket.data.user.username}`);
       socket.emit("room-created", roomId);
+      emitLobbyUpdate(io, rooms, roomId, MAX_MEMBERS_PER_ROOM);
+    });
+
+    socket.on("get-problem-catalog", (payload = {}) => {
+      if (!checkRateLimit(socket, "get-problem-catalog", emitSocketError)) {
+        return;
+      }
+
+      if (typeof payload !== "object" || payload === null) {
+        emitSocketError("Invalid problem-catalog payload");
+        return;
+      }
+
+      const roomId = extractRoomId(payload.roomId || socket.data.roomId);
+      if (!roomId || !ROOM_ID_REGEX.test(roomId)) {
+        emitSocketError("Invalid room ID");
+        return;
+      }
+
+      const room = rooms.get(roomId);
+      if (!room) {
+        emitSocketError("Room does not exist");
+        return;
+      }
+
+      const userId = socket.data.user.userId;
+      const canAccessRoom =
+        room.members.has(socket.id) ||
+        isUserActiveMember(room, userId) ||
+        room.participantUserIds?.has(userId);
+
+      if (!canAccessRoom) {
+        emitSocketError("You are not allowed to access this room");
+        return;
+      }
+
+      socket.emit("problem-catalog", {
+        roomId,
+        facets: getProblemCatalogFacets(),
+        problems: getFilteredProblemCatalog(payload),
+        selectedProblemSet: toPublicProblemSet(room.problemSet),
+      });
+    });
+
+    socket.on("set-room-problems", (payload = {}) => {
+      if (!checkRateLimit(socket, "set-room-problems", emitSocketError)) return;
+
+      if (typeof payload !== "object" || payload === null) {
+        emitSocketError("Invalid room-problems payload");
+        return;
+      }
+
+      const roomId = extractRoomId(payload.roomId || socket.data.roomId);
+      if (!roomId || !ROOM_ID_REGEX.test(roomId)) {
+        emitSocketError("Invalid room ID");
+        return;
+      }
+
+      const room = rooms.get(roomId);
+      if (!room) {
+        emitSocketError("Room does not exist");
+        return;
+      }
+
+      if (room.status !== "lobby") {
+        emitSocketError("Problems can only be configured in lobby");
+        return;
+      }
+
+      const currentMember = room.members.get(socket.id);
+      if (!currentMember) {
+        emitSocketError("You are not in this room");
+        return;
+      }
+
+      if (currentMember.role !== "admin") {
+        emitSocketError("Only admin can configure problems");
+        return;
+      }
+
+      if (Array.isArray(payload.problemIds)) {
+        if (payload.problemIds.length > MAX_PROBLEMS_PER_ROOM) {
+          emitSocketError(
+            `You can configure up to ${MAX_PROBLEMS_PER_ROOM} problems`
+          );
+          return;
+        }
+      } else {
+        emitSocketError("Problem list is required");
+        return;
+      }
+
+      const problemIds = normalizeProblemIds(payload.problemIds);
+      if (problemIds.length === 0) {
+        emitSocketError("Select at least one problem");
+        return;
+      }
+
+      const selectedProblems = [];
+      for (const problemId of problemIds) {
+        const problem = PROBLEM_MAP.get(problemId);
+        if (!problem) {
+          emitSocketError("One or more selected problems are invalid");
+          return;
+        }
+        selectedProblems.push(problem);
+      }
+
+      room.problemSet = {
+        problemIds,
+        problems: selectedProblems,
+        configuredBy: socket.data.user.userId,
+        configuredAt: Date.now(),
+      };
+      room.abandonedAt = null;
+
+      const publicProblemSet = toPublicProblemSet(room.problemSet);
+      socket.emit("room-problems-set", {
+        roomId,
+        problemSet: publicProblemSet,
+      });
+
       emitLobbyUpdate(io, rooms, roomId, MAX_MEMBERS_PER_ROOM);
     });
 
@@ -165,13 +381,15 @@ export const initSocket = (io) => {
       }
 
       const isStartedRoom = room.status === "started";
+      const isCountdownRoom = room.status === "countdown";
+      const isLobbyRoom = room.status === "lobby";
 
-      if (isStartedRoom) {
+      if (isStartedRoom || isCountdownRoom) {
         if (!room.participantUserIds?.has(socket.data.user.userId)) {
           emitSocketError("Room has already started");
           return;
         }
-      } else if (room.status === "lobby") {
+      } else if (isLobbyRoom) {
         if (
           room.members.size >= MAX_MEMBERS_PER_ROOM &&
           !room.members.has(socket.id)
@@ -194,7 +412,7 @@ export const initSocket = (io) => {
         ready: previousReadyState,
       });
       room.abandonedAt = null;
-      if (!isStartedRoom) {
+      if (isLobbyRoom) {
         room.participantUserIds?.add(socket.data.user.userId);
       }
       socket.data.roomId = roomId;
@@ -204,6 +422,16 @@ export const initSocket = (io) => {
         socket.emit("room-resume", { roomId });
       } else {
         socket.emit("room-joined", roomId);
+        if (isCountdownRoom) {
+          const secondsLeft = getCountdownSecondsLeft(room.countdownEndsAt);
+          if (secondsLeft > 0) {
+            socket.emit("room-countdown", {
+              roomId,
+              secondsLeft,
+              countdownEndsAt: room.countdownEndsAt,
+            });
+          }
+        }
       }
       emitLobbyUpdate(io, rooms, roomId, MAX_MEMBERS_PER_ROOM);
     });
@@ -270,7 +498,11 @@ export const initSocket = (io) => {
       }
 
       if (room.status !== "lobby") {
-        emitSocketError("Room has already started");
+        if (room.status === "countdown") {
+          emitSocketError("Countdown is already running");
+        } else {
+          emitSocketError("Room has already started");
+        }
         return;
       }
 
@@ -287,15 +519,16 @@ export const initSocket = (io) => {
 
       const lobbyState = buildLobbyState(rooms, roomId, MAX_MEMBERS_PER_ROOM);
       if (!lobbyState || !lobbyState.canStart) {
+        if (!lobbyState?.hasProblemSet) {
+          emitSocketError("Admin must set room problems before start");
+          return;
+        }
+
         emitSocketError("All members must be ready");
         return;
       }
 
-      room.status = "started";
-      room.startedAt = Date.now();
-      room.abandonedAt = null;
-      emitLobbyUpdate(io, rooms, roomId, MAX_MEMBERS_PER_ROOM);
-      io.to(roomId).emit("room-started", { roomId });
+      startRoomCountdown(io, roomId);
     });
 
     socket.on("disconnect", () => {

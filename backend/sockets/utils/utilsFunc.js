@@ -5,12 +5,15 @@ export const ROOM_ID_LENGTH = 7;
 export const ROOM_ID_REGEX = /^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{7}$/;
 export const MAX_MEMBERS_PER_ROOM = 20;
 export const MAX_ABUSE_STRIKES = 6;
+export const MAX_PROBLEMS_PER_ROOM = 5;
 
 export const GLOBAL_RATE_LIMIT = { windowMs: 8000, max: 45 };
 export const EVENT_RATE_LIMITS = {
   "identify-user": { windowMs: 10000, max: 8 },
   "create-room": { windowMs: 60000, max: 4 },
   "join-room": { windowMs: 20000, max: 8 },
+  "get-problem-catalog": { windowMs: 10000, max: 10 },
+  "set-room-problems": { windowMs: 12000, max: 6 },
   "toggle-ready": { windowMs: 6000, max: 12 },
   "start-room": { windowMs: 10000, max: 4 },
 };
@@ -19,9 +22,214 @@ export const CLIENT_EVENTS = new Set([
   "identify-user",
   "create-room",
   "join-room",
+  "get-problem-catalog",
+  "set-room-problems",
   "toggle-ready",
   "start-room",
 ]);
+
+export const PROBLEM_CATALOG = [
+  {
+    id: "two-sum",
+    title: "Two Sum",
+    difficulty: "Easy",
+    topics: ["array"],
+    tags: ["hashmap", "lookup"],
+  },
+  {
+    id: "contains-duplicate",
+    title: "Contains Duplicate",
+    difficulty: "Easy",
+    topics: ["array"],
+    tags: ["hashset"],
+  },
+  {
+    id: "merge-intervals",
+    title: "Merge Intervals",
+    difficulty: "Medium",
+    topics: ["sorting"],
+    tags: ["intervals"],
+  },
+  {
+    id: "sort-colors",
+    title: "Sort Colors",
+    difficulty: "Medium",
+    topics: ["sorting", "array"],
+    tags: ["two-pointers", "counting"],
+  },
+  {
+    id: "single-number",
+    title: "Single Number",
+    difficulty: "Easy",
+    topics: ["bit-manipulation"],
+    tags: ["xor"],
+  },
+  {
+    id: "counting-bits",
+    title: "Counting Bits",
+    difficulty: "Medium",
+    topics: ["bit-manipulation", "dynamic-programming"],
+    tags: ["bitmask"],
+  },
+  {
+    id: "longest-substring-without-repeat",
+    title: "Longest Substring Without Repeating Characters",
+    difficulty: "Medium",
+    topics: ["string"],
+    tags: ["sliding-window", "hashmap"],
+  },
+  {
+    id: "valid-parentheses",
+    title: "Valid Parentheses",
+    difficulty: "Easy",
+    topics: ["stack"],
+    tags: ["string"],
+  },
+  {
+    id: "number-of-islands",
+    title: "Number of Islands",
+    difficulty: "Medium",
+    topics: ["graph"],
+    tags: ["dfs", "bfs", "matrix"],
+  },
+  {
+    id: "course-schedule",
+    title: "Course Schedule",
+    difficulty: "Medium",
+    topics: ["graph"],
+    tags: ["topological-sort"],
+  },
+  {
+    id: "kth-largest-element-in-an-array",
+    title: "Kth Largest Element in an Array",
+    difficulty: "Medium",
+    topics: ["heap", "sorting"],
+    tags: ["priority-queue"],
+  },
+  {
+    id: "binary-tree-level-order-traversal",
+    title: "Binary Tree Level Order Traversal",
+    difficulty: "Medium",
+    topics: ["tree"],
+    tags: ["bfs"],
+  },
+  {
+    id: "coin-change",
+    title: "Coin Change",
+    difficulty: "Medium",
+    topics: ["dynamic-programming"],
+    tags: ["unbounded-knapsack"],
+  },
+];
+
+export const PROBLEM_MAP = new Map(
+  PROBLEM_CATALOG.map((problem) => [problem.id, problem])
+);
+
+const normalizeFilterToken = (value) =>
+  typeof value === "string" ? value.trim().toLowerCase() : "";
+
+const sanitizeFilterList = (value, maxItems = 20) => {
+  if (!Array.isArray(value)) return [];
+  const unique = new Set();
+  for (const raw of value) {
+    const token = normalizeFilterToken(raw);
+    if (!token) continue;
+    unique.add(token);
+    if (unique.size >= maxItems) break;
+  }
+  return Array.from(unique);
+};
+
+export const getProblemCatalogFacets = () => {
+  const topicSet = new Set();
+  const tagSet = new Set();
+  const difficultySet = new Set();
+
+  for (const problem of PROBLEM_CATALOG) {
+    for (const topic of problem.topics) topicSet.add(topic);
+    for (const tag of problem.tags) tagSet.add(tag);
+    difficultySet.add(problem.difficulty);
+  }
+
+  return {
+    topics: Array.from(topicSet).sort(),
+    tags: Array.from(tagSet).sort(),
+    difficulties: Array.from(difficultySet).sort(),
+  };
+};
+
+export const toPublicProblem = (problem) => ({
+  id: problem.id,
+  title: problem.title,
+  difficulty: problem.difficulty,
+  topics: [...problem.topics],
+  tags: [...problem.tags],
+});
+
+export const getFilteredProblemCatalog = (filters = {}) => {
+  const selectedTopics = sanitizeFilterList(filters.topics);
+  const selectedTags = sanitizeFilterList(filters.tags);
+  const selectedDifficulties = sanitizeFilterList(filters.difficulties);
+  const search = normalizeFilterToken(filters.search);
+
+  return PROBLEM_CATALOG.filter((problem) => {
+    if (
+      selectedTopics.length > 0 &&
+      !selectedTopics.some((topic) => problem.topics.includes(topic))
+    ) {
+      return false;
+    }
+
+    if (
+      selectedTags.length > 0 &&
+      !selectedTags.some((tag) => problem.tags.includes(tag))
+    ) {
+      return false;
+    }
+
+    if (
+      selectedDifficulties.length > 0 &&
+      !selectedDifficulties.includes(problem.difficulty.toLowerCase())
+    ) {
+      return false;
+    }
+
+    if (search.length > 0) {
+      const haystack = `${problem.title} ${problem.topics.join(" ")} ${problem.tags.join(" ")}`.toLowerCase();
+      if (!haystack.includes(search)) return false;
+    }
+
+    return true;
+  }).map(toPublicProblem);
+};
+
+export const normalizeProblemIds = (value, maxItems = MAX_PROBLEMS_PER_ROOM) => {
+  if (!Array.isArray(value)) return [];
+  const unique = new Set();
+  for (const raw of value) {
+    const id = typeof raw === "string" ? raw.trim() : "";
+    if (!id) continue;
+    unique.add(id);
+    if (unique.size >= maxItems) break;
+  }
+  return Array.from(unique);
+};
+
+export const toPublicProblemSet = (problemSet) => {
+  if (!problemSet || !Array.isArray(problemSet.problems)) {
+    return null;
+  }
+
+  return {
+    problemIds: Array.isArray(problemSet.problemIds)
+      ? [...problemSet.problemIds]
+      : [],
+    problems: problemSet.problems.map(toPublicProblem),
+    configuredBy: problemSet.configuredBy || null,
+    configuredAt: problemSet.configuredAt || null,
+  };
+};
 
 export const normalizeRoomId = (value) =>
   typeof value === "string" ? value.trim().toUpperCase() : "";
@@ -87,6 +295,8 @@ export const buildLobbyState = (
   const hasAdmin = members.some((member) => member.role === "admin");
   const allReady =
     members.length > 0 && members.every((member) => member.ready === true);
+  const problemSet = toPublicProblemSet(room.problemSet);
+  const hasProblemSet = Boolean(problemSet && problemSet.problemIds.length > 0);
 
   return {
     roomId,
@@ -95,7 +305,9 @@ export const buildLobbyState = (
     memberCount: members.length,
     maxMembers,
     allReady,
-    canStart: room.status === "lobby" && hasAdmin && allReady,
+    hasProblemSet,
+    problemSet,
+    canStart: room.status === "lobby" && hasAdmin && allReady && hasProblemSet,
   };
 };
 
@@ -224,14 +436,14 @@ export const removeSocketFromRoom = (
   socket.data.roomId = undefined;
   console.log(`${user.username} left room ${roomId}`);
 
-  // Keep started rooms available for eligible participant re-joins.
-  if (room.members.size === 0 && room.status !== "started") {
+  // Remove empty rooms only in lobby; countdown/started states should be rejoin-safe.
+  if (room.members.size === 0 && room.status === "lobby") {
     rooms.delete(roomId);
     console.log(`Room deleted: ${roomId}`);
     return;
   }
 
-  if (room.status === "started") {
+  if (room.status === "started" || room.status === "countdown") {
     room.abandonedAt = room.members.size === 0 ? Date.now() : null;
   }
 

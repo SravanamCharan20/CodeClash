@@ -22,6 +22,8 @@ export default function Lobby() {
   const [allReady, setAllReady] = useState(false);
   const [canStart, setCanStart] = useState(false);
   const [roomStatus, setRoomStatus] = useState("lobby");
+  const [problemSet, setProblemSet] = useState(null);
+  const [countdownSeconds, setCountdownSeconds] = useState(null);
   const [socketReady, setSocketReady] = useState(socket.connected);
   const [isReadyActionPending, setIsReadyActionPending] = useState(false);
   const [isStartActionPending, setIsStartActionPending] = useState(false);
@@ -35,6 +37,11 @@ export default function Lobby() {
   }, [members, user]);
 
   const isAdmin = user?.role === "admin";
+  const hasProblemSet = Boolean(
+    problemSet &&
+      Array.isArray(problemSet.problemIds) &&
+      problemSet.problemIds.length > 0
+  );
 
   useEffect(() => {
     if (!roomIdValid) return;
@@ -75,18 +82,41 @@ export default function Lobby() {
       setMembers(Array.isArray(payload.members) ? payload.members : []);
       setAllReady(Boolean(payload.allReady));
       setCanStart(Boolean(payload.canStart));
-      setRoomStatus(payload.status === "started" ? "started" : "lobby");
+      setProblemSet(
+        payload.problemSet && typeof payload.problemSet === "object"
+          ? payload.problemSet
+          : null
+      );
+      const nextStatus =
+        payload.status === "started" || payload.status === "countdown"
+          ? payload.status
+          : "lobby";
+      setRoomStatus(nextStatus);
+      if (nextStatus !== "countdown") {
+        setCountdownSeconds(null);
+      }
       setError("");
       resetPendingState();
     };
 
+    const handleRoomCountdown = ({ roomId: countdownRoomId, secondsLeft } = {}) => {
+      if (countdownRoomId !== roomId) return;
+      if (typeof secondsLeft === "number" && Number.isFinite(secondsLeft)) {
+        setCountdownSeconds(Math.max(1, Math.ceil(secondsLeft)));
+      }
+      setRoomStatus("countdown");
+      setError("");
+    };
+
     const handleRoomStarted = ({ roomId: startedRoomId } = {}) => {
       if (startedRoomId !== roomId) return;
+      setCountdownSeconds(null);
       router.push(`/rooms/devarena?roomId=${roomId}`);
     };
 
     const handleRoomResume = ({ roomId: resumedRoomId } = {}) => {
       if (resumedRoomId !== roomId) return;
+      setCountdownSeconds(null);
       router.push(`/rooms/devarena?roomId=${roomId}`);
     };
 
@@ -104,6 +134,7 @@ export default function Lobby() {
     socket.on("connect", handleConnect);
     socket.on("disconnect", handleDisconnect);
     socket.on("lobby-update", handleLobbyUpdate);
+    socket.on("room-countdown", handleRoomCountdown);
     socket.on("room-started", handleRoomStarted);
     socket.on("room-resume", handleRoomResume);
     socket.on("socket-error", handleSocketError);
@@ -118,6 +149,7 @@ export default function Lobby() {
       socket.off("connect", handleConnect);
       socket.off("disconnect", handleDisconnect);
       socket.off("lobby-update", handleLobbyUpdate);
+      socket.off("room-countdown", handleRoomCountdown);
       socket.off("room-started", handleRoomStarted);
       socket.off("room-resume", handleRoomResume);
       socket.off("socket-error", handleSocketError);
@@ -153,6 +185,10 @@ export default function Lobby() {
     }
     if (roomStatus !== "lobby") {
       setError("Room is already started");
+      return;
+    }
+    if (!hasProblemSet) {
+      setError("Admin must configure problems before starting");
       return;
     }
     if (!canStart) {
@@ -199,7 +235,9 @@ export default function Lobby() {
               <p className="text-xs uppercase tracking-[0.12em] text-[var(--arena-muted)]">
                 Status
               </p>
-              <p className="mt-1 font-medium text-white">{roomStatus}</p>
+              <p className="mt-1 font-medium text-white">
+                {roomStatus.toUpperCase()}
+              </p>
             </div>
 
             <div className="rounded-md border border-[var(--arena-border)] bg-black/30 px-3 py-2">
@@ -221,6 +259,15 @@ export default function Lobby() {
               </p>
               <p className="mt-1 font-medium text-white">
                 {allReady ? "Yes" : "No"}
+              </p>
+            </div>
+
+            <div className="rounded-md border border-[var(--arena-border)] bg-black/30 px-3 py-2">
+              <p className="text-xs uppercase tracking-[0.12em] text-[var(--arena-muted)]">
+                Problem Set
+              </p>
+              <p className="mt-1 font-medium text-white">
+                {hasProblemSet ? `${problemSet.problemIds.length} selected` : "Not configured"}
               </p>
             </div>
           </div>
@@ -257,6 +304,42 @@ export default function Lobby() {
             ))}
           </ul>
 
+          <div className="mt-4 rounded-md border border-[var(--arena-border)] bg-black/35 p-3">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-xs uppercase tracking-[0.12em] text-[var(--arena-muted)]">
+                Configured Problems
+              </p>
+              {isAdmin && (
+                <button
+                  type="button"
+                  onClick={() => router.push(`/rooms/problemSetup?roomId=${roomId}`)}
+                  className="rounded-md border border-[var(--arena-border)] bg-[var(--arena-panel-soft)] px-2.5 py-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-white transition hover:bg-[#1e2630]"
+                >
+                  Edit Set
+                </button>
+              )}
+            </div>
+
+            {!hasProblemSet && (
+              <p className="mt-2 text-sm text-[var(--arena-muted)]">
+                Admin must set problems before match start.
+              </p>
+            )}
+
+            {hasProblemSet && (
+              <ul className="mt-2 space-y-1">
+                {(Array.isArray(problemSet.problems) ? problemSet.problems : []).map((problem) => (
+                  <li key={problem.id} className="text-sm text-white/90">
+                    {problem.title}{" "}
+                    <span className="text-[var(--arena-muted)]">
+                      ({problem.difficulty})
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
           <div className="mt-5 grid gap-3 sm:grid-cols-2">
             {me && (
               <button
@@ -279,13 +362,14 @@ export default function Lobby() {
                 disabled={
                   !socketReady ||
                   roomStatus !== "lobby" ||
+                  !hasProblemSet ||
                   !canStart ||
                   isStartActionPending
                 }
                 className="h-11 rounded-md border border-[var(--arena-border)] bg-[#1f2937] text-sm font-semibold text-white transition hover:bg-[#273447] disabled:cursor-not-allowed disabled:opacity-60"
                 onClick={handleStartRoom}
               >
-                {isStartActionPending ? "Starting..." : "Start Room"}
+                {isStartActionPending ? "Starting..." : "Start Countdown"}
               </button>
             )}
           </div>
@@ -297,6 +381,22 @@ export default function Lobby() {
           )}
         </section>
       </section>
+
+      {typeof countdownSeconds === "number" && roomStatus === "countdown" && (
+        <section className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 px-4">
+          <div className="w-full max-w-sm rounded-xl border border-[var(--arena-border)] bg-[var(--arena-panel)]/95 p-8 text-center shadow-2xl">
+            <p className="text-xs uppercase tracking-[0.18em] text-[var(--arena-muted)]">
+              Match Starting
+            </p>
+            <p className="mt-3 text-7xl font-semibold leading-none text-[var(--arena-green)]">
+              {countdownSeconds}
+            </p>
+            <p className="mt-3 text-sm text-[var(--arena-muted)]">
+              Syncing all players to DevArena...
+            </p>
+          </div>
+        </section>
+      )}
     </main>
   );
 }

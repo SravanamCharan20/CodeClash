@@ -33,7 +33,7 @@ const CreateRoom = () => {
       }
 
       console.log("✅ Room created:", roomId);
-      router.push(`/rooms/lobby?roomId=${roomId}`);
+      router.push(`/rooms/problemSetup?roomId=${roomId}`);
     };
 
     const handleConnect = () => {
@@ -100,7 +100,7 @@ const CreateRoom = () => {
           Create Room
         </h1>
         <p className="mt-2 text-sm text-[var(--arena-muted)]">
-          Generate a private room code and move to lobby.
+          Generate a private room code, then configure the challenge set.
         </p>
 
         <div className="mt-6 rounded-lg border border-[var(--arena-border)] bg-black/35 p-4">
